@@ -1,0 +1,34 @@
+requires 'perl', '5.020';
+requires 'Catalyst';
+requires 'Catalyst::Runtime', '>= 5.90100';
+requires 'Catalyst::Model::DBIC::Schema';
+requires 'Catalyst::View::JSON';
+requires 'Catalyst::View::TT';
+requires 'Moose';
+requires 'MooseX::Role::Parameterized';
+requires 'namespace::autoclean';
+requires 'JSON::MaybeXS';
+requires 'JSON::WebToken', '>= 0.14';
+requires 'Crypt::OpenSSL::RSA';
+requires 'Crypt::OpenSSL::X509';
+requires 'Digest::SHA';
+requires 'MIME::Base64';
+requires 'DateTime';
+requires 'DateTime::Format::ISO8601';
+requires 'Config::General';
+requires 'URI';
+requires 'URI::URL';
+requires 'HTTP::Request';
+requires 'LWP::UserAgent';
+requires 'LWP::Protocol::https';
+requires 'UNIVERSAL::require';
+requires 'Try::Tiny';
+requires 'Log::Log4perl';
+requires 'Data::UUID';
+
+on 'test' => sub {
+    requires 'Test::More', '>= 0.88';
+    requires 'Test::Exception';
+    requires 'Test::MockObject';
+    requires 'Test::Deep';
+};
