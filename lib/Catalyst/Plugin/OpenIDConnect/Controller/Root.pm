@@ -474,7 +474,7 @@ __PACKAGE__->meta->make_immutable;
 
 =head1 AUTHOR
 
-Trevor Frayner <tfrayner@example.com>
+Tim F. Rayner
 
 =head1 LICENSE
 

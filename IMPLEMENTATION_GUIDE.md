@@ -463,4 +463,4 @@ This implementation is available under the same license as Perl itself.
 
 ## Author
 
-Trevor Frayner <tfrayner@example.com>
+Tim F. Rayner

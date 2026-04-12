@@ -195,7 +195,7 @@ prove -l t/
 
 ### Author
 
-Trevor Frayner <tfrayner@example.com>
+Tim F. Rayner
 
 ### License
 

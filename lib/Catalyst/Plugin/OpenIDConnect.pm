@@ -5,6 +5,7 @@ use warnings;
 use Moose::Role;
 use namespace::autoclean;
 
+use Catalyst::Plugin::OpenIDConnect::Context;
 use Catalyst::Plugin::OpenIDConnect::Utils::JWT;
 use Catalyst::Plugin::OpenIDConnect::Utils::Store;
 use Crypt::OpenSSL::RSA;
@@ -139,7 +140,7 @@ Returns the OIDC context/handler object for use in controllers.
 
 sub openidconnect {
     my ($c) = @_;
-    return _OpenIDConnectContext->new( catalyst => $c );
+    return Catalyst::Plugin::OpenIDConnect::Context->new( catalyst => $c );
 }
 
 =head2 _oidc_build_jwt_handler($config)
@@ -215,109 +216,11 @@ sub _build_store {
     return Catalyst::Plugin::OpenIDConnect::Utils::Store->new();
 }
 
-# Context object for passing to controllers
-package _OpenIDConnectContext;
-
-use Moose;
-use namespace::autoclean;
-
-has catalyst => (
-    is  => 'ro',
-    isa => 'Catalyst',
-);
-
-sub jwt {
-    my ($self) = @_;
-    return $self->catalyst->_oidc_jwt();
-}
-
-sub store {
-    my ($self) = @_;
-    return $self->catalyst->_oidc_store();
-}
-
-sub config {
-    my ($self) = @_;
-    return $self->catalyst->config->{'Plugin::OpenIDConnect'} || {};
-}
-
-sub get_client {
-    my ( $self, $client_id ) = @_;
-    my $clients = $self->config->{clients} || {};
-    return $clients->{$client_id};
-}
-
-sub get_user_claims {
-    my ( $self, $user ) = @_;
-
-    my $claims_config = $self->config->{user_claims} || {
-        sub      => 'id',
-        name     => 'name',
-        email    => 'email',
-    };
-
-    my %claims;
-
-    for my $claim_name ( keys %$claims_config ) {
-        my $accessor = $claims_config->{$claim_name};
-        my @parts = split /\./, $accessor;
-
-        my $value = $user;
-        for my $part (@parts) {
-            last unless defined $value;
-            if ( ref $value eq 'HASH' ) {
-                $value = $value->{$part};
-            } else {
-                $value = $value->$part() if $value->can($part);
-            }
-        }
-
-        $claims{$claim_name} = $value if defined $value;
-    }
-
-    return \%claims;
-}
-
-sub get_discovery {
-    my ($self) = @_;
-
-    my $c = $self->catalyst;
-    my $issuer_url = $self->config->{issuer}{url} || $c->uri_for('/')->as_string;
-
-    return {
-        issuer                          => $issuer_url,
-        authorization_endpoint          => $c->uri_for('/openidconnect/authorize')->as_string,
-        token_endpoint                  => $c->uri_for('/openidconnect/token')->as_string,
-        userinfo_endpoint               => $c->uri_for('/openidconnect/userinfo')->as_string,
-        jwks_uri                        => $c->uri_for('/openidconnect/jwks')->as_string,
-        registration_endpoint           => undef,
-        scopes_supported                => [qw(openid profile email phone address)],
-        response_types_supported        => [qw(code id_token token id_token token code id_token token)],
-        response_modes_supported        => [qw(query fragment form_post)],
-        grant_types_supported           => [qw(authorization_code refresh_token implicit)],
-        subject_types_supported         => [qw(public pairwise)],
-        id_token_signing_alg_values_supported => ['RS256'],
-        userinfo_signing_alg_values_supported => ['RS256'],
-        request_parameter_supported    => 1,
-        request_uri_parameter_supported => 1,
-        claims_supported                => [
-            qw(
-                sub name given_name family_name middle_name nickname
-                preferred_username profile picture website email email_verified
-                gender birthdate zoneinfo locale phone_number phone_number_verified
-                address updated_at
-            )
-        ],
-        claim_types_supported          => [qw(normal aggregated distributed)],
-    };
-}
-
-__PACKAGE__->meta->make_immutable;
 1;
 
 =head1 AUTHOR
 
-Trevor Frayner <tfrayner@example.com>
+Tim F. Rayner
 
 =head1 LICENSE
 
