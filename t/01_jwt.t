@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
-use Test::More tests => 15;
+use Test::More;
 use Test::Exception;
 use FindBin;
 use lib "$FindBin::Bin/../lib";

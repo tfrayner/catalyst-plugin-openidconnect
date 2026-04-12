@@ -1,4 +1,4 @@
-package Catalyst::Plugin::OpenIDConnect::Store;
+package Catalyst::Plugin::OpenIDConnect::Utils::Store;
 
 use strict;
 use warnings;
