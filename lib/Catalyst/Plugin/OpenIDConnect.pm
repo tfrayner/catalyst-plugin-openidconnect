@@ -16,6 +16,8 @@ use DateTime::Format::ISO8601;
 use Data::UUID;
 use URI;
 
+our $VERSION = '0.01';
+
 =head1 NAME
 
 Catalyst::Plugin::OpenIDConnect - OpenID Connect provider plugin for Catalyst
@@ -177,7 +179,6 @@ sub _oidc_build_jwt_handler {
     close $key_fh;
 
     my $private_key = Crypt::OpenSSL::RSA->new_private_key($key_data);
-    $private_key->use_pkcs1_padding();
 
     # Load or derive public key
     my $public_key;
@@ -193,7 +194,6 @@ sub _oidc_build_jwt_handler {
             $private_key->get_public_key_string()
         );
     }
-    $public_key->use_pkcs1_padding();
 
     my $key_id = $issuer_cfg->{key_id} || 'default';
 

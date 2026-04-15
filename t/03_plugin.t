@@ -15,13 +15,11 @@ use JSON::MaybeXS qw(encode_json);
 
 # Generate test keys
 my $rsa = Crypt::OpenSSL::RSA->generate_key(1024);
-$rsa->use_pkcs1_padding();
 
 my $private_key = $rsa;
 my $public_key = Crypt::OpenSSL::RSA->new_public_key(
     $rsa->get_public_key_string()
 );
-$public_key->use_pkcs1_padding();
 
 # Create JWT handler for testing context methods
 my $jwt = Catalyst::Plugin::OpenIDConnect::Utils::JWT->new(

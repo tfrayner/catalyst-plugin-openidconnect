@@ -5,7 +5,7 @@ requires 'Catalyst::View::JSON';
 requires 'Moose';
 requires 'namespace::autoclean';
 requires 'JSON::MaybeXS';
-requires 'Crypt::OpenSSL::RSA';
+requires 'Crypt::OpenSSL::RSA', '0.35'; # for openssl 3 support; upgrade to 0.37+ when possible FIXME
 requires 'Digest::SHA';
 requires 'MIME::Base64';
 requires 'DateTime';
