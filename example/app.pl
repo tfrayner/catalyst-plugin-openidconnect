@@ -7,8 +7,9 @@ use FindBin;
 use lib "$FindBin::Bin/../lib";
 
 package OIDCExample;
-use Catalyst;
+
 use Catalyst::Runtime 5.90100;
+use Catalyst;
 
 use strict;
 use warnings;
@@ -73,6 +74,13 @@ __PACKAGE__->setup(
         Static::Simple
     /
 );
+
+# Required by OpenIDConnect role
+sub user {
+    my ($self) = @_;
+    return $self->{session}->{user} if ref $self && ref $self->{session};
+    return;
+}
 
 =head1 NAME
 

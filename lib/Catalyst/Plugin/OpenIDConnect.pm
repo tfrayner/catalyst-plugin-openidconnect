@@ -59,6 +59,10 @@ providing OAuth 2.0 authentication and authorization.
 
 requires 'config', 'log', 'uri_for', 'user', 'request', 'response';
 
+# Package-level storage for JWT and Store instances
+our $_oidc_jwt_instance;
+our $_oidc_store_instance;
+
 =head1 ATTRIBUTES
 
 =head2 _oidc_jwt
@@ -67,12 +71,16 @@ JWT handler instance.
 
 =cut
 
-has _oidc_jwt => (
-    is       => 'rw',
-    isa      => 'Catalyst::Plugin::OpenIDConnect::Utils::JWT',
-    lazy     => 1,
-    builder  => '_build_jwt',
-);
+# Accessor method for JWT handler
+sub _oidc_jwt {
+    my ($self, $value) = @_;
+    if (defined $value) {
+        die 'JWT handler must be an instance of Catalyst::Plugin::OpenIDConnect::Utils::JWT'
+            unless ref $value && $value->isa('Catalyst::Plugin::OpenIDConnect::Utils::JWT');
+        $_oidc_jwt_instance = $value;
+    }
+    return $_oidc_jwt_instance;
+}
 
 =head2 _oidc_store
 
@@ -80,12 +88,16 @@ State and code storage.
 
 =cut
 
-has _oidc_store => (
-    is       => 'rw',
-    isa      => 'Catalyst::Plugin::OpenIDConnect::Utils::Store',
-    lazy     => 1,
-    builder  => '_build_store',
-);
+# Accessor method for Store handler
+sub _oidc_store {
+    my ($self, $value) = @_;
+    if (defined $value) {
+        die 'Store handler must be an instance of Catalyst::Plugin::OpenIDConnect::Utils::Store'
+            unless ref $value && $value->isa('Catalyst::Plugin::OpenIDConnect::Utils::Store');
+        $_oidc_store_instance = $value;
+    }
+    return $_oidc_store_instance;
+}
 
 =head1 METHODS
 
