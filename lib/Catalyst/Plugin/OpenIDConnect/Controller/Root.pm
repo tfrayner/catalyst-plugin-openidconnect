@@ -10,7 +10,8 @@ use URI;
 use DateTime;
 use Try::Tiny;
 
-__PACKAGE__->config->{namespace} = 'openidconnect';
+# Set the namespace for OpenIDConnect routes
+__PACKAGE__->config(namespace => 'openidconnect');
 
 =head1 NAME
 

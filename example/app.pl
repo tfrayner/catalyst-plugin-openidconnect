@@ -5,6 +5,10 @@ use warnings;
 
 use FindBin;
 use lib "$FindBin::Bin/../lib";
+use lib "$FindBin::Bin/lib";
+
+# Explicitly require the OpenIDConnect controller before app setup
+require OIDCExample::Controller::OpenIDConnect;
 
 package OIDCExample;
 
@@ -217,9 +221,8 @@ sub end : ActionClass('RenderView') {}
 
 __PACKAGE__->meta->make_immutable;
 
+# Run the application
 package main;
-
-# Create and run the application
 OIDCExample->run;
 
 =head1 AUTHOR

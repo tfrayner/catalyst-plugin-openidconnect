@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.1] - 2026-04-16 (Bug Fixes & Integration Improvements)
+
+### Changed
+
+- **Controller Integration**: Plugin now requires applications to create an extending controller in the app's namespace for proper route discovery. This ensures compatibility with Catalyst::Plugin::ACL and other route-processing plugins.
+  - The plugin's controller (`Catalyst::Plugin::OpenIDConnect::Controller::Root`) is now a base class
+  - Applications must create `lib/MyApp/Controller/OpenIDConnect.pm` that extends the plugin controller
+  - This allows Catalyst to properly auto-discover routes and prevents dispatcher conflicts
+
+- **Plugin Namespace Configuration**: Moved namespace configuration from extending controller to the base plugin controller
+  - Base controller now sets `namespace => 'openidconnect'` by default
+  - Extending controllers automatically inherit this configuration
+  - Simplifies application setup
+
+- **Simplified Plugin Lifecycle**: Changed from `setup_component`/`finalize_setup` to `after 'setup'` method modifier
+  - Uses proper Moose role syntax for plugin hooks
+  - Ensures correct execution order with other plugins like ACL
+
+### Fixed
+
+- Fixed "traversal hit a dead end" error when using plugin with existing apps that have route-processing plugins (ACL, etc.)
+- Fixed plugin initialization to gracefully handle missing configuration
+- Improved error handling for missing private key configuration
+
+### Documentation
+
+- Updated QUICKSTART.md with controller setup instructions
+- Updated README.md with extending controller example
+- Updated IMPLEMENTATION_GUIDE.md with detailed integration steps
+- Updated DEPLOYMENT.md with production controller setup
+
+---
+
 ## [1.0.0] - 2024-04-10 (Initial Release)
 
 ### Added

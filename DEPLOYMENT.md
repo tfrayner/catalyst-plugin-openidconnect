@@ -81,6 +81,38 @@ Create/update `catalyst.conf`:
 </Plugin::Session>
 ```
 
+### 4. Create the OpenIDConnect Controller
+
+Create `lib/MyApp/Controller/OpenIDConnect.pm` in your application:
+
+```perl
+package MyApp::Controller::OpenIDConnect;
+
+use Moose;
+use namespace::autoclean;
+
+BEGIN { extends 'Catalyst::Plugin::OpenIDConnect::Controller::Root' }
+
+__PACKAGE__->meta->make_immutable;
+
+1;
+```
+
+Then load it in your main app module before setup:
+
+```perl
+package MyApp;
+use Catalyst qw/
+    OpenIDConnect
+    Session
+    Session::Store::File
+    Session::State::Cookie
+/;
+
+# Load the controller before setup
+use MyApp::Controller::OpenIDConnect;
+```
+
 ## HTTPS Configuration
 
 HTTPS is mandatory for production deployments.

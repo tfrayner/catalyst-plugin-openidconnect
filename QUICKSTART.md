@@ -50,8 +50,31 @@ __PACKAGE__->config(
     },
 );
 
+# Load the OpenIDConnect controller before setup
+use MyApp::Controller::OpenIDConnect;
+
 __PACKAGE__->setup;
 ```
+
+## 3a. Create the OpenIDConnect Controller
+
+The plugin requires you to create a controller that extends the plugin's controller.
+Create `lib/MyApp/Controller/OpenIDConnect.pm`:
+
+```perl
+package MyApp::Controller::OpenIDConnect;
+
+use Moose;
+use namespace::autoclean;
+
+BEGIN { extends 'Catalyst::Plugin::OpenIDConnect::Controller::Root' }
+
+__PACKAGE__->meta->make_immutable;
+
+1;
+```
+
+This allows Catalyst to properly discover and register all OpenIDConnect routes.
 
 ## 4. Test the Flow
 

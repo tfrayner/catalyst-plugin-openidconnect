@@ -52,10 +52,47 @@ Catalyst::Plugin::OpenIDConnect - OpenID Connect provider plugin for Catalyst
         },
     );
 
+=head1 CREATING THE OPENIDCONNECT CONTROLLER
+
+To enable the OpenIDConnect endpoints, create a controller in your app that extends
+the plugin's controller. Create the file C<lib/MyApp/Controller/OpenIDConnect.pm>:
+
+    package MyApp::Controller::OpenIDConnect;
+
+    use Moose;
+    use namespace::autoclean;
+
+    BEGIN { extends 'Catalyst::Plugin::OpenIDConnect::Controller::Root' }
+
+    __PACKAGE__->meta->make_immutable;
+    1;
+
+Then, in your main app module, explicitly load this controller before setup:
+
+    package MyApp;
+    use Catalyst qw/
+        OpenIDConnect
+        Session
+        Session::Store::File
+        Session::State::Cookie
+    /;
+    
+    # Load the controller before setup so Catalyst discovers it
+    use MyApp::Controller::OpenIDConnect;
+    
+    MyApp->config(...);
+    MyApp->setup(...);
+
 =head1 DESCRIPTION
 
 A Catalyst plugin implementing the OpenID Connect specification,
 providing OAuth 2.0 authentication and authorization.
+
+NOTE: This plugin provides the core OpenIDConnect functionality (JWT handling, 
+state management, and a reusable controller). To use it in your application, 
+you must create a controller in your app's namespace that extends the plugin's 
+controller. This allows you to keep full control over your routing and avoid 
+namespace conflicts with ACL and other route-processing plugins.
 
 =cut
 
@@ -103,48 +140,35 @@ sub _oidc_store {
 
 =head1 METHODS
 
-=head2 setup_component
+=head2 setup
 
-Catalyst component setup hook.
-
-=cut
-
-sub setup_component {
-    my ($self) = @_;
-    return unless ref $self eq 'Catalyst' or $self->isa('Catalyst');
-    
-    my $c = $self;
-    
-    # Load and validate configuration
-    my $config = $c->config->{'Plugin::OpenIDConnect'} || {};
-    
-    # Create JWT handler
-    my $jwt = $c->_oidc_build_jwt_handler($config);
-    $c->_oidc_jwt($jwt);
-    
-    # Create store
-    my $store = Catalyst::Plugin::OpenIDConnect::Utils::Store->new();
-    $c->_oidc_store($store);
-    
-    $c->log->info('OpenID Connect plugin initialized');
-}
-
-=head2 finalize_setup
-
-Fully initialize the plugin after all components are loaded.
+Catalyst setup hook - initialize the plugin.
 
 =cut
 
-sub finalize_setup {
-    my ($self) = @_;
-    return unless ref $self eq 'Catalyst' or $self->isa('Catalyst');
+after 'setup' => sub {
+    my ($app) = @_;
     
-    my $c = $self;
-    $c->next::method() if $c->can('next::method');
+    my $config = $app->config->{'Plugin::OpenIDConnect'} || {};
     
-    # Register built-in routes if needed
-    # Controllers are auto-discovered by Catalyst
-}
+    # Only initialize if properly configured
+    if ( $config->{issuer} && $config->{issuer}{private_key_file} ) {
+        try {
+            # Create JWT handler
+            my $jwt = $app->_oidc_build_jwt_handler($config);
+            $app->_oidc_jwt($jwt);
+            
+            # Create store
+            my $store = Catalyst::Plugin::OpenIDConnect::Utils::Store->new();
+            $app->_oidc_store($store);
+            
+            $app->log->info('OpenID Connect plugin initialized');
+        }
+        catch {
+            $app->log->error("Failed to initialize OpenID Connect plugin: $_");
+        };
+    }
+};
 
 =head2 openidconnect()
 

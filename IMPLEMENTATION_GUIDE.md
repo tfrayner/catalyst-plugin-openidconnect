@@ -290,6 +290,53 @@ $c->openidconnect->on_token_issued(sub {
 
 ## Usage in Controllers
 
+### Setting Up the Plugin in Your Application
+
+The plugin provides all OpenIDConnect functionality through a reusable controller. To use it, create an extending controller in your application's namespace.
+
+**Step 1: Create the extending controller** at `lib/MyApp/Controller/OpenIDConnect.pm`:
+
+```perl
+package MyApp::Controller::OpenIDConnect;
+
+use Moose;
+use namespace::autoclean;
+
+BEGIN { extends 'Catalyst::Plugin::OpenIDConnect::Controller::Root' }
+
+__PACKAGE__->meta->make_immutable;
+
+1;
+```
+
+**Step 2: Load the controller in your main app module:**
+
+```perl
+package MyApp;
+use Catalyst qw/
+    OpenIDConnect
+    Session
+    Session::Store::File
+    Session::State::Cookie
+/;
+
+# Load the controller before setup
+use MyApp::Controller::OpenIDConnect;
+
+MyApp->config(
+    'Plugin::OpenIDConnect' => {
+        issuer => { ... },
+        clients => { ... },
+    },
+);
+
+MyApp->setup;
+```
+
+**Why this approach?**
+
+Catalyst only auto-discovers controllers in the application's namespace. By creating an extending controller in your app's namespace, Catalyst can properly register the routes with the dispatcher. This ensures compatibility with ACL and other route-processing plugins.
+
 ### Protecting Routes
 
 Check for authentication in your controllers:

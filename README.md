@@ -43,7 +43,41 @@ use Catalyst qw/
 /;
 ```
 
-### 2. Configure in your catalyst.conf
+### 2. Create the OpenIDConnect controller
+
+The plugin requires you to create a controller that extends the plugin's controller.
+Create `lib/MyApp/Controller/OpenIDConnect.pm`:
+
+```perl
+package MyApp::Controller::OpenIDConnect;
+
+use Moose;
+use namespace::autoclean;
+
+BEGIN { extends 'Catalyst::Plugin::OpenIDConnect::Controller::Root' }
+
+__PACKAGE__->meta->make_immutable;
+
+1;
+```
+
+Then load it in your main app module before setup:
+
+```perl
+package MyApp;
+use Catalyst qw/
+    -Debug
+    OpenIDConnect
+    Session
+    Session::Store::File
+    Session::State::Cookie
+/;
+
+# Load the controller before setup
+use MyApp::Controller::OpenIDConnect;
+```
+
+### 3. Configure in your catalyst.conf
 
 ```
 <Plugin::OpenIDConnect>
@@ -75,7 +109,7 @@ use Catalyst qw/
 </Plugin::OpenIDConnect>
 ```
 
-### 3. Use in your controllers
+### 4. Use in your controllers
 
 ```perl
 package MyApp::Controller::Protected;
