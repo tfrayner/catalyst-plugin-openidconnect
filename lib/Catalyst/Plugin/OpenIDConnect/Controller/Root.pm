@@ -39,9 +39,7 @@ Returns the OpenID Connect provider configuration.
 sub discovery : Path('/.well-known/openid-configuration') {
     my ( $self, $c ) = @_;
 
-    $c->response->content_type('application/json');
-    $c->stash->{json} = $c->openidconnect->get_discovery();
-    $c->forward('View::JSON');
+    $self->_json_response( $c, $c->openidconnect->get_discovery() );
 }
 
 =head2 authorize
@@ -121,7 +119,7 @@ sub authorize : Local {
             nonce         => $nonce,
         };
 
-        return $c->response->redirect( $c->uri_for('/login?back=/openidconnect/authorize') );
+        return $c->response->redirect( $c->uri_for('/login', { back => '/openidconnect/authorize' }) );
     }
 
     # Create authorization code
@@ -202,8 +200,6 @@ UserInfo endpoint returning authenticated user's claims.
 sub userinfo : Local {
     my ( $self, $c ) = @_;
 
-    $c->response->content_type('application/json');
-
     # Get bearer token
     my $auth_header = $c->request->header('Authorization') || '';
     my ($token) = $auth_header =~ /^Bearer\s+(\S+)$/;
@@ -238,8 +234,7 @@ sub userinfo : Local {
         $claims{$claim} = $payload->{$claim} if exists $payload->{$claim};
     }
 
-    $c->stash->{json} = \%claims;
-    $c->forward('View::JSON');
+    $self->_json_response( $c, \%claims );
 }
 
 =head2 logout
@@ -275,11 +270,9 @@ sub logout : Local {
     }
 
     # Return success JSON response
-    $c->response->content_type('application/json');
-    $c->stash->{json} = {
+    $self->_json_response( $c, {
         message => 'Logged out successfully',
-    };
-    $c->forward('View::JSON');
+    });
 }
 
 =head2 jwks
@@ -294,8 +287,6 @@ Returns the public key(s) for verifying signatures.
 
 sub jwks : Local {
     my ( $self, $c ) = @_;
-
-    $c->response->content_type('application/json');
 
     # Get JWT handler
     my $jwt = $c->openidconnect->jwt;
@@ -313,11 +304,7 @@ sub jwks : Local {
         # In a production system, extract actual modulus and exponent
     );
 
-    $c->stash->{json} = {
-        keys => [ \%jwk ],
-    };
-
-    $c->forward('View::JSON');
+    $self->_json_response( $c, { keys => [ \%jwk ] } );
 }
 
 # Private helper methods
@@ -387,15 +374,13 @@ sub _handle_authorization_code_grant {
     my $refresh_token = $c->openidconnect->jwt->create_refresh_token(%refresh_token_payload);
 
     # Return tokens
-    $c->stash->{json} = {
+    $self->_json_response( $c, {
         access_token  => $access_token,
         token_type    => 'Bearer',
         id_token      => $id_token,
         expires_in    => 3600,
         refresh_token => $refresh_token,
-    };
-
-    $c->forward('View::JSON');
+    });
 }
 
 sub _handle_refresh_token_grant {
@@ -434,13 +419,11 @@ sub _handle_refresh_token_grant {
 
     my $access_token = $c->openidconnect->jwt->create_access_token(%new_payload);
 
-    $c->stash->{json} = {
+    $self->_json_response( $c, {
         access_token => $access_token,
         token_type   => 'Bearer',
         expires_in   => 3600,
-    };
-
-    $c->forward('View::JSON');
+    });
 }
 
 sub _error_response {
@@ -455,12 +438,10 @@ sub _error_response {
         );
         return $c->response->redirect( $callback_uri->as_string );
     } else {
-        $c->response->content_type('application/json');
-        $c->stash->{json} = {
+        return $self->_json_response( $c, {
             error             => $error,
             error_description => $error_description,
-        };
-        return $c->forward('View::JSON');
+        });
     }
 }
 
@@ -468,12 +449,17 @@ sub _json_error {
     my ( $self, $c, $error, $error_description ) = @_;
 
     $c->response->status(400);
-    $c->stash->{json} = {
+    return $self->_json_response( $c, {
         error             => $error,
         error_description => $error_description,
-    };
+    });
+}
 
-    return $c->forward('View::JSON');
+sub _json_response {
+    my ( $self, $c, $data ) = @_;
+
+    $c->response->content_type('application/json');
+    $c->response->body( encode_json($data) );
 }
 
 __PACKAGE__->meta->make_immutable;

@@ -12,7 +12,6 @@ WriteMakefile(
         'perl'                                => '5.020',
         'Catalyst'                            => 0,
         'Catalyst::Runtime'                   => '5.90100',
-        'Catalyst::View::JSON'                => 0,
         'Moose'                               => 0,
         'namespace::autoclean'                => 0,
         'JSON::MaybeXS'                       => 0,

@@ -76,6 +76,42 @@ __PACKAGE__->meta->make_immutable;
 
 This allows Catalyst to properly discover and register all OpenIDConnect routes.
 
+## 3b. Create a Login Action
+
+Your app must have a login action that handles the `back` parameter. The plugin redirects unauthenticated users to your login page, which should redirect back to complete the authentication flow:
+
+```perl
+package MyApp::Controller::Auth;
+
+use Moose;
+use namespace::autoclean;
+
+BEGIN { extends 'Catalyst::Controller'; }
+
+sub login : Local {
+    my ( $self, $c ) = @_;
+
+    if ( $c->request->method eq 'POST' ) {
+        my $username = $c->request->params->{username};
+
+        # In development, accept any username
+        if ($username) {
+            $c->session->{user} = { username => $username, id => $username };
+
+            # Redirect to 'back' parameter to resume OIDC flow
+            my $back = $c->request->params->{back} || '/';
+            return $c->response->redirect($back);
+        }
+
+        $c->stash->{error} = 'Username required';
+    }
+
+    $c->stash->{template} = 'login.html';
+}
+
+1;
+```
+
 ## 4. Test the Flow
 
 ### Step 1: Start Authorization

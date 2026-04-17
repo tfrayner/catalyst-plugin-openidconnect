@@ -109,7 +109,44 @@ use MyApp::Controller::OpenIDConnect;
 </Plugin::OpenIDConnect>
 ```
 
-### 4. Use in your controllers
+### 4. Implement a login action
+
+Your app must have a login action that supports the `back` parameter. When a user is not authenticated, the plugin redirects to your login page with a `back` parameter indicating where to return:
+
+```perl
+package MyApp::Controller::Auth;
+use Moose;
+use namespace::autoclean;
+
+BEGIN { extends 'Catalyst::Controller'; }
+
+sub login : Local {
+    my ( $self, $c ) = @_;
+
+    if ( $c->request->method eq 'POST' ) {
+        my $username = $c->request->params->{username};
+        my $password = $c->request->params->{password};
+
+        # Validate credentials
+        if ( validate_credentials($username, $password) ) {
+            my $user = get_user($username);
+            $c->session->{user} = $user;
+
+            # IMPORTANT: Redirect to 'back' parameter to resume OIDC flow
+            my $back = $c->request->params->{back} || '/';
+            return $c->response->redirect($back);
+        }
+
+        $c->stash->{error} = 'Invalid credentials';
+    }
+
+    $c->stash->{template} = 'login.html';
+}
+
+1;
+```
+
+### 5. Use in your controllers
 
 ```perl
 package MyApp::Controller::Protected;

@@ -1,7 +1,7 @@
 requires 'perl', '5.020';
 requires 'Catalyst';
 requires 'Catalyst::Runtime', '>= 5.90100';
-requires 'Catalyst::View::JSON';
+
 requires 'Moose';
 requires 'namespace::autoclean';
 requires 'JSON::MaybeXS';

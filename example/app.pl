@@ -143,7 +143,9 @@ sub login : Local {
             $c->session->{user_id} = $user->{id};
             $c->session->{user} = $user;
 
-            # Redirect to the original request if available
+            # IMPORTANT: The 'back' parameter is used by the OpenID Connect plugin
+            # to resume the authorization flow after successful authentication.
+            # Always redirect to it if provided to properly complete the OIDC flow.
             my $back = $c->request->params->{back} || '/';
             return $c->response->redirect($back);
         }

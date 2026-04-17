@@ -374,6 +374,42 @@ my $token = $oidc->jwt->sign_token(sub => 'user-123');
 my $code = $oidc->store->create_authorization_code(...);
 ```
 
+### Implementing the Login Action
+
+When the OpenID Connect plugin redirects an unauthenticated user to your login page, it includes a `back` parameter specifying where to return after successful authentication. Your login action **must support the `back` parameter** to resume the authorization flow.
+
+```perl
+sub login : Local {
+    my ( $self, $c ) = @_;
+
+    if ( $c->request->method eq 'POST' ) {
+        my $username = $c->request->params->{username};
+        my $password = $c->request->params->{password};
+
+        # Validate credentials against your user store
+        if ( validate_user($username, $password) ) {
+            my $user = get_user($username);
+            
+            # Store user in session
+            $c->session->{user} = $user;
+            $c->session->{user_id} = $user->id;
+
+            # IMPORTANT: Redirect to the 'back' parameter if provided
+            # This resumes the authorization flow after authentication
+            my $back = $c->request->params->{back} || '/';
+            return $c->response->redirect($back);
+        }
+
+        $c->stash->{error} = 'Invalid credentials';
+    }
+
+    # Display login form
+    $c->stash->{template} = 'login.html';
+}
+```
+
+The plugin will redirect to your login page like: `/login?back=/openidconnect/authorize`. After successful authentication, redirect back to the `back` URL to resume the authorization process.
+
 ## Security Considerations
 
 ### HTTPS Requirement
