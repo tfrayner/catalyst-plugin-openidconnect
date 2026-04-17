@@ -36,11 +36,12 @@ Returns the OpenID Connect provider configuration.
 
 =cut
 
-sub discovery : Path('/.well-known/openid-configuration') : ActionClass('RenderView') {
+sub discovery : Path('/.well-known/openid-configuration') {
     my ( $self, $c ) = @_;
 
     $c->response->content_type('application/json');
-    $c->stash->{discovery} = $c->openidconnect->get_discovery();
+    $c->stash->{json} = $c->openidconnect->get_discovery();
+    $c->forward('View::JSON');
 }
 
 =head2 authorize
@@ -270,10 +271,15 @@ sub logout : Local {
     my $redirect_uri = $c->request->params->{post_logout_redirect_uri};
     if ($redirect_uri) {
         # Validate redirect URI (in production, check against registered URIs)
-        $c->response->redirect($redirect_uri);
-    } else {
-        $c->response->body('Logged out successfully');
+        return $c->response->redirect($redirect_uri);
     }
+
+    # Return success JSON response
+    $c->response->content_type('application/json');
+    $c->stash->{json} = {
+        message => 'Logged out successfully',
+    };
+    $c->forward('View::JSON');
 }
 
 =head2 jwks
