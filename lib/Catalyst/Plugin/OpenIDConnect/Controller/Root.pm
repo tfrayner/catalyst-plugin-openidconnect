@@ -64,9 +64,17 @@ sub authorize : Local {
     my $response_type = $c->request->params->{response_type};
     my $client_id     = $c->request->params->{client_id};
     my $redirect_uri  = $c->request->params->{redirect_uri};
-    my $scope         = $c->request->params->{scope} || 'openid';
+    my $scope         = $c->request->params->{scope};
     my $state         = $c->request->params->{state};
     my $nonce         = $c->request->params->{nonce};
+
+    my $stored_auth_request = $c->session->{oidc_auth_request} || {};
+    $response_type //= $stored_auth_request->{response_type};
+    $client_id     //= $stored_auth_request->{client_id};
+    $redirect_uri  //= $stored_auth_request->{redirect_uri};
+    $scope         ||= $stored_auth_request->{scope} || 'openid';
+    $state         //= $stored_auth_request->{state};
+    $nonce         //= $stored_auth_request->{nonce};
 
     # Validate request parameters
     unless ( $response_type && $response_type eq 'code' ) {
@@ -136,6 +144,9 @@ sub authorize : Local {
         nonce        => $nonce,
     };
 
+    # Clear the stored authorization request after resuming the flow.
+    delete $c->session->{oidc_auth_request};
+
     # Build redirect URI with code and state
     my $callback_uri = URI->new($redirect_uri);
     $callback_uri->query_form(
@@ -156,8 +167,8 @@ Parameters (form-encoded):
   - grant_type (REQUIRED): "authorization_code" or "refresh_token"
   - code (REQUIRED for authorization_code): The authorization code
   - redirect_uri (REQUIRED): Must match authorization request
-  - client_id (REQUIRED): The client ID
-  - client_secret (REQUIRED): The client secret
+  - client_id (OPTIONAL): The client ID (extracted from code if not provided)
+  - client_secret (OPTIONAL): The client secret (required for confidential clients, optional for public clients)
 
 Returns:
   - access_token: The access token
@@ -317,25 +328,36 @@ sub _handle_authorization_code_grant {
     my $client_id     = $c->request->params->{client_id};
     my $client_secret = $c->request->params->{client_secret};
 
-    unless ( $code && $redirect_uri && $client_id && $client_secret ) {
-        return $self->_json_error( $c, 'invalid_request', 'Missing required parameters' );
+    unless ( $code && $redirect_uri ) {
+        return $self->_json_error( $c, 'invalid_request', 'code and redirect_uri are required' );
     }
 
-    # Verify client credentials
-    my $client = $c->openidconnect->get_client($client_id);
-    unless ( $client && $client->{client_secret} eq $client_secret ) {
-        return $self->_json_error( $c, 'invalid_client', 'Client authentication failed' );
-    }
-
-    # Get authorization code
+    # Get authorization code to validate and extract client_id if not provided
     my $code_data = $c->openidconnect->store->get_authorization_code($code);
     unless ($code_data) {
         return $self->_json_error( $c, 'invalid_grant', 'Authorization code not found or expired' );
     }
 
+    # Use client_id from authorization code if not provided in request (public client flow)
+    $client_id ||= $code_data->{client_id};
+
     # Verify redirect URI matches
     unless ( $code_data->{redirect_uri} eq $redirect_uri ) {
         return $self->_json_error( $c, 'invalid_grant', 'Redirect URI mismatch' );
+    }
+
+    # If client_secret is provided, verify client credentials (confidential client)
+    if ($client_secret) {
+        my $client = $c->openidconnect->get_client($client_id);
+        unless ( $client && $client->{client_secret} eq $client_secret ) {
+            return $self->_json_error( $c, 'invalid_client', 'Client authentication failed' );
+        }
+    } else {
+        # For public clients (no secret provided), at least verify client exists
+        my $client = $c->openidconnect->get_client($client_id);
+        unless ($client) {
+            return $self->_json_error( $c, 'invalid_client', 'Unknown client' );
+        }
     }
 
     # Consume the code (one-time use)

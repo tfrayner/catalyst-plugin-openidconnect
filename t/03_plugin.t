@@ -119,6 +119,23 @@ my $ctx_store = $context->store();
 ok($ctx_store, 'store() returns store');
 isa_ok($ctx_store, 'Catalyst::Plugin::OpenIDConnect::Utils::Store');
 
+# Test lazy store initialization when no store is preconfigured
+my $mock_no_store = MockCatalyst->new(
+    config => {
+        'Plugin::OpenIDConnect' => {
+            issuer => { url => 'http://localhost:5000' },
+        },
+    },
+);
+
+my $ctx_lazy = Catalyst::Plugin::OpenIDConnect::Context->new(
+    catalyst => $mock_no_store,
+);
+
+my $lazy_store = $ctx_lazy->store();
+ok($lazy_store, 'store() lazy-initializes a store when missing');
+isa_ok($lazy_store, 'Catalyst::Plugin::OpenIDConnect::Utils::Store');
+
 # Test config() method
 my $config = $context->config();
 ok($config, 'config() returns configuration');

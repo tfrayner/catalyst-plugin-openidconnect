@@ -2,6 +2,7 @@ package Catalyst::Plugin::OpenIDConnect::Context;
 
 use Moose;
 use namespace::autoclean;
+use Catalyst::Plugin::OpenIDConnect::Utils::Store;
 
 =head1 NAME
 
@@ -45,7 +46,12 @@ Returns the state store instance.
 
 sub store {
     my ($self) = @_;
-    return $self->catalyst->_oidc_store();
+    my $store = $self->catalyst->_oidc_store();
+    return $store if $store;
+
+    my $new_store = Catalyst::Plugin::OpenIDConnect::Utils::Store->new();
+    $self->catalyst->_oidc_store($new_store) if $self->catalyst->can('_oidc_store');
+    return $new_store;
 }
 
 =head2 config()
