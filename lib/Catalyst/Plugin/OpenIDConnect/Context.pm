@@ -142,6 +142,7 @@ sub get_discovery {
         token_endpoint                  => "$base_url/openidconnect/token",
         userinfo_endpoint               => "$base_url/openidconnect/userinfo",
         jwks_uri                        => "$base_url/openidconnect/jwks",
+        end_session_endpoint            => "$base_url/openidconnect/logout",
         registration_endpoint           => undef,
         scopes_supported                => [qw(openid profile email phone address)],
         response_types_supported        => [qw(code id_token token id_token token code id_token token)],
