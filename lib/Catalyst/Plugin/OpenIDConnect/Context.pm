@@ -35,7 +35,11 @@ Returns the JWT handler instance.
 
 sub jwt {
     my ($self) = @_;
-    return $self->catalyst->_oidc_jwt();
+    my $jwt = $self->catalyst->_oidc_jwt();
+    unless ($jwt) {
+        die 'OpenID Connect JWT handler not initialized. Check your Plugin::OpenIDConnect configuration (issuer.private_key_file and issuer.public_key_file required).';
+    }
+    return $jwt;
 }
 
 =head2 store()
@@ -128,12 +132,16 @@ sub get_discovery {
     my $c = $self->catalyst;
     my $issuer_url = $self->config->{issuer}{url} || $c->uri_for('/')->as_string;
 
+    # Extract scheme and authority from issuer URL to ensure endpoints match issuer scheme
+    my $base_url = $issuer_url;
+    $base_url =~ s{/$}{};  # Remove trailing slash if present
+
     return {
         issuer                          => $issuer_url,
-        authorization_endpoint          => $c->uri_for('/openidconnect/authorize')->as_string,
-        token_endpoint                  => $c->uri_for('/openidconnect/token')->as_string,
-        userinfo_endpoint               => $c->uri_for('/openidconnect/userinfo')->as_string,
-        jwks_uri                        => $c->uri_for('/openidconnect/jwks')->as_string,
+        authorization_endpoint          => "$base_url/openidconnect/authorize",
+        token_endpoint                  => "$base_url/openidconnect/token",
+        userinfo_endpoint               => "$base_url/openidconnect/userinfo",
+        jwks_uri                        => "$base_url/openidconnect/jwks",
         registration_endpoint           => undef,
         scopes_supported                => [qw(openid profile email phone address)],
         response_types_supported        => [qw(code id_token token id_token token code id_token token)],

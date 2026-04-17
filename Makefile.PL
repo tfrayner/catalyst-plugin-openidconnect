@@ -15,7 +15,8 @@ WriteMakefile(
         'Moose'                               => 0,
         'namespace::autoclean'                => 0,
         'JSON::MaybeXS'                       => 0,
-        'Crypt::OpenSSL::RSA'                 => '0.35', # for openssl 3 support; upgrade to 0.37+ when possible FIXME
+        'Crypt::OpenSSL::RSA'                 => '0.35', # for RSA signing/verification with JWT (openssl 3 support)
+        'Crypt::PK::RSA'                      => 0, # for JWK key parameter extraction in JWKS endpoint
         'Digest::SHA'                         => 0,
         'MIME::Base64'                        => 0,
         'DateTime'                            => 0,

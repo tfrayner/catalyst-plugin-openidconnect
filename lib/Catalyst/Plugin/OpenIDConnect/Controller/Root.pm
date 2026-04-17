@@ -6,6 +6,8 @@ use namespace::autoclean;
 BEGIN { extends 'Catalyst::Controller'; }
 
 use JSON::MaybeXS qw(encode_json decode_json);
+use MIME::Base64 qw(encode_base64 decode_base64);
+use Crypt::PK::RSA;
 use URI;
 use DateTime;
 use Try::Tiny;
@@ -299,20 +301,30 @@ Returns the public key(s) for verifying signatures.
 sub jwks : Local {
     my ( $self, $c ) = @_;
 
-    # Get JWT handler
+    # Get JWT handler and public key
     my $jwt = $c->openidconnect->jwt;
+    my $public_key = $jwt->public_key;
 
-    # Create JWK from public key
-    my $public_key_pem = $jwt->public_key->get_public_key_string();
+    # Convert OpenSSL public key to Crypt::PK::RSA for easier parameter extraction
+    my $public_key_pem = $public_key->get_public_key_string();
+    my $pk = Crypt::PK::RSA->new(\$public_key_pem);
 
-    # Extract modulus and exponent from RSA public key
-    # For now, return simplified structure - in production, use cryptographic libraries
+    # Get key parameters for JWK generation
+    my $keydata = $pk->key2hash();
+
+    # Convert modulus and exponent to base64url
+    # Note: key2hash() returns lowercase keys (e, N, etc.)
+    my $n = $self->_bigint_to_base64url($keydata->{N});
+    my $e = $self->_bigint_to_base64url($keydata->{e});
+
+    # Create JWK with all required fields
     my %jwk = (
         kty => 'RSA',
         use => 'sig',
         kid => $jwt->key_id,
         alg => 'RS256',
-        # In a production system, extract actual modulus and exponent
+        n   => $n,
+        e   => $e,
     );
 
     $self->_json_response( $c, { keys => [ \%jwk ] } );
@@ -482,6 +494,37 @@ sub _json_response {
 
     $c->response->content_type('application/json');
     $c->response->body( encode_json($data) );
+}
+
+sub _hex_to_base64url {
+    my ( $self, $hex_string ) = @_;
+
+    # Remove any spaces or newlines
+    $hex_string =~ s/\s+//g;
+
+    # Convert hex to binary
+    my $binary = pack('H*', $hex_string);
+
+    # Encode to base64
+    my $base64 = encode_base64($binary, '');
+
+    # Convert to base64url (- instead of +, _ instead of /)
+    $base64 =~ tr/+\//\-_/;
+
+    # Remove padding
+    $base64 =~ s/=+$//;
+
+    return $base64;
+}
+
+sub _bigint_to_base64url {
+    my ( $self, $hex_str ) = @_;
+
+    return '' unless $hex_str;  # Handle empty/undef
+
+    # Crypt::PK::RSA returns big integers as hex strings (lowercase)
+    # Convert directly using the hex-to-base64url method
+    return $self->_hex_to_base64url($hex_str);
 }
 
 __PACKAGE__->meta->make_immutable;

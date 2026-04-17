@@ -9,6 +9,7 @@ use Catalyst::Plugin::OpenIDConnect::Context;
 use Catalyst::Plugin::OpenIDConnect::Utils::JWT;
 use Catalyst::Plugin::OpenIDConnect::Utils::Store;
 use Crypt::OpenSSL::RSA;
+use Crypt::PK::RSA;
 use JSON::MaybeXS qw(encode_json decode_json);
 use Try::Tiny;
 use DateTime;

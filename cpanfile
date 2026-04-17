@@ -5,7 +5,8 @@ requires 'Catalyst::Runtime', '>= 5.90100';
 requires 'Moose';
 requires 'namespace::autoclean';
 requires 'JSON::MaybeXS';
-requires 'Crypt::OpenSSL::RSA', '0.35'; # for openssl 3 support; upgrade to 0.37+ when possible FIXME
+requires 'Crypt::OpenSSL::RSA', '0.35'; # for RSA signing/verification with JWT (openssl 3 support)
+requires 'Crypt::PK::RSA'; # for JWK key parameter extraction in JWKS endpoint
 requires 'Digest::SHA';
 requires 'MIME::Base64';
 requires 'DateTime';

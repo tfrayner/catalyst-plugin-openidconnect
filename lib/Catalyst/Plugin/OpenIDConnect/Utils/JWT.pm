@@ -102,9 +102,11 @@ sub sign_token {
     my $header_b64   = _urlsafe_b64_encode($header_json);
     my $payload_b64  = _urlsafe_b64_encode($payload_json);
 
-    # Create signature
+    # Create signature (explicitly use SHA256 for RS256)
     my $signing_input = "$header_b64.$payload_b64";
-    my $signature = $self->private_key->sign($signing_input);
+    my $priv_key = $self->private_key;
+    $priv_key->use_sha256_hash();
+    my $signature = $priv_key->sign($signing_input);
     my $signature_b64 = _urlsafe_b64_encode($signature);
 
     return "$signing_input.$signature_b64";
@@ -128,11 +130,13 @@ sub verify_token {
 
         my ( $header_b64, $payload_b64, $signature_b64 ) = @parts;
 
-        # Verify signature
+        # Verify signature (explicitly use SHA256 for RS256)
         my $signing_input = "$header_b64.$payload_b64";
         my $signature = _urlsafe_b64_decode($signature_b64);
-
-        die 'Invalid signature' unless $self->public_key->verify(
+        
+        my $pub_key = $self->public_key;
+        $pub_key->use_sha256_hash();
+        die 'Invalid signature' unless $pub_key->verify(
             $signing_input,
             $signature
         );
