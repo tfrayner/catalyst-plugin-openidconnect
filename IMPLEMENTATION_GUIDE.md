@@ -407,7 +407,7 @@ The plugin will redirect to your login page like: `/login?back=/openidconnect/au
 
 ### CSRF Protection
 - Always verify the `state` parameter matches the session
-- Nonce binding prevents authorization code attacks
+- Nonce binding support (client responsibility to validate nonce matches)
 
 ### Code Security
 - Authorization codes are one-time use only

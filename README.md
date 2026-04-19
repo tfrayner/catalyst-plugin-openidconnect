@@ -9,7 +9,7 @@ A Catalyst plugin implementing the OpenID Connect specification. This plugin pro
 - **UserInfo Endpoint**: Provides authenticated user information claims
 - **Discovery Endpoint**: OpenID Connect discovery (/.well-known/openid-configuration)
 - **JWT Handling**: Sign and verify JSON Web Tokens with RS256 algorithm
-- **State & Nonce**: Built-in CSRF protection and nonce validation
+- **State & Nonce**: CSRF protection via state parameter; nonce binding support (client must validate)
 - **Session Management**: User session tracking and token refresh
 - **Configurable**: Easy configuration via Catalyst config or external files
 - **Database Agnostic**: Works with any Catalyst ORM model
