@@ -2,6 +2,10 @@
 
 A Catalyst plugin implementing the OpenID Connect specification. This plugin provides OAuth 2.0 authentication and authorization capabilities with full OIDC compliance.
 
+**Note that this is not an OIDC client plugin**. If that is what you seek, please take a look at the [Catalyst::Plugin::OIDC](https://metacpan.org/pod/Catalyst::Plugin::OIDC) module maintained elsewhere.
+
+**Full disclosure**: this plugin has been written with the aid of Claude Haiku 4.5. A human has been included in the loop throughout, closely monitoring the agent outputs, but this is an early release and mistakes may have crept through. Please create an issue on Github if you find any errors. Thank you!
+
 ## Features
 
 - **Authorization Code Flow**: Full support for OpenID Connect authorization code flow
