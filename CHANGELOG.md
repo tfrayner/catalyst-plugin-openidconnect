@@ -232,4 +232,4 @@ Tim F. Rayner
 
 ### License
 
-This library is free software; you can redistribute it and/or modify it under the same terms as Perl itself.
+This library is available under The Artistic License 2.0 (GPL Compatible). See LICENSE file for details.

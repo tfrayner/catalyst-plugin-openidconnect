@@ -344,7 +344,7 @@ prove -l t/
 
 ## License
 
-This module is available under the same license as Perl itself.
+This module is available under The Artistic License 2.0 (GPL Compatible). See LICENSE file for details.
 
 ## Author
 

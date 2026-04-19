@@ -521,7 +521,7 @@ sub create_authorization_code {
 
 ## License
 
-This implementation is available under the same license as Perl itself.
+This implementation is available under The Artistic License 2.0 (GPL Compatible). See LICENSE file for details.
 
 ## Author
 
