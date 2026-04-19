@@ -56,6 +56,18 @@ has uuid_gen => (
     default => sub { Data::UUID->new() },
 );
 
+=head2 logger
+
+Optional logger instance for debug/info logging.
+
+=cut
+
+has logger => (
+    is       => 'ro',
+    isa      => 'Maybe[Object]',
+    required => 0,
+);
+
 =head1 METHODS
 
 =head2 create_authorization_code($client_id, $user, $scope, $redirect_uri, $nonce)
@@ -69,6 +81,8 @@ Returns the authorization code string.
 sub create_authorization_code {
     my ( $self, $client_id, $user, $scope, $redirect_uri, $nonce ) = @_;
 
+    $self->logger->debug("Creating authorization code for client: $client_id") if $self->logger;
+
     my $code = _generate_secure_random();
 
     $self->codes->{$code} = {
@@ -80,6 +94,8 @@ sub create_authorization_code {
         created_at   => time(),
         expires_at   => time() + 600,  # 10 minutes
     };
+
+    $self->logger->debug("Authorization code created: $code (expires in 600 seconds)") if $self->logger;
 
     return $code;
 }
@@ -95,16 +111,20 @@ Returns the code data hashref or undef if not found.
 sub get_authorization_code {
     my ( $self, $code ) = @_;
 
+    $self->logger->debug("Retrieving authorization code: $code") if $self->logger;
+
     my $code_data = $self->codes->{$code};
 
     return unless $code_data;
 
     # Check if code is expired
     if ( $code_data->{expires_at} < time() ) {
+        $self->logger->warn("Authorization code expired: $code") if $self->logger;
         delete $self->codes->{$code};
         return;
     }
 
+    $self->logger->debug("Authorization code found: $code") if $self->logger;
     return $code_data;
 }
 
@@ -116,6 +136,7 @@ Consumes (removes) an authorization code after it's been exchanged for tokens.
 
 sub consume_authorization_code {
     my ( $self, $code ) = @_;
+    $self->logger->debug("Consuming authorization code: $code") if $self->logger;
     delete $self->codes->{$code};
 }
 
@@ -130,6 +151,8 @@ Returns the session ID.
 sub create_session {
     my ( $self, $user, $tokens ) = @_;
 
+    $self->logger->debug('Creating new user session') if $self->logger;
+
     my $session_id = $self->uuid_gen->to_string( $self->uuid_gen->create() );
 
     $self->sessions->{$session_id} = {
@@ -138,6 +161,8 @@ sub create_session {
         created_at => time(),
         last_activity => time(),
     };
+
+    $self->logger->debug("Session created: $session_id") if $self->logger;
 
     return $session_id;
 }
@@ -152,6 +177,7 @@ Returns the session data hashref or undef if not found.
 
 sub get_session {
     my ( $self, $session_id ) = @_;
+    $self->logger->debug("Retrieving session: $session_id") if $self->logger;
     return $self->sessions->{$session_id};
 }
 
@@ -191,11 +217,15 @@ Removes expired authorization codes.
 sub cleanup_expired_codes {
     my ($self) = @_;
 
+    $self->logger->debug('Cleaning up expired authorization codes') if $self->logger;
+
     my $now = time();
     my @expired = grep { $self->codes->{$_}{expires_at} < $now }
                   keys %{ $self->codes };
 
     delete @{ $self->codes }{@expired};
+
+    $self->logger->debug("Expired codes cleaned up: " . scalar(@expired) . " codes removed") if $self->logger;
 
     return scalar @expired;
 }
@@ -210,11 +240,15 @@ sub cleanup_expired_sessions {
     my ( $self, $max_age ) = @_;
     $max_age ||= 3600 * 24;  # 24 hours by default
 
+    $self->logger->debug("Cleaning up expired sessions (max_age: $max_age seconds)") if $self->logger;
+
     my $now = time();
     my @expired = grep { ( $now - $self->sessions->{$_}{last_activity} ) > $max_age }
                   keys %{ $self->sessions };
 
     delete @{ $self->sessions }{@expired};
+
+    $self->logger->debug("Expired sessions cleaned up: " . scalar(@expired) . " sessions removed") if $self->logger;
 
     return scalar @expired;
 }
