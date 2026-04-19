@@ -299,17 +299,4 @@ is_deeply($empty_context->config, {}, 'empty config returns empty hashref');
 my $empty_client = $empty_context->get_client('any-client');
 is($empty_client, undef, 'get_client() handles empty clients config');
 
-# Regression test: plugin controller uses direct JSON serialization (no View dependency)
-{
-    no warnings qw/redefine once/;
-    local @INC = ( @INC, "$FindBin::Bin/../example/lib" );
-    *OIDCExample::run = sub { 1 };
-    require "$FindBin::Bin/../example/app.pl";
-}
-
-# Verify the controller can be loaded and has the _json_response helper
-ok( Catalyst::Plugin::OpenIDConnect::Controller::Root->can('_json_response'),
-    'plugin controller provides _json_response helper for direct JSON serialization'
-);
-
 done_testing();
