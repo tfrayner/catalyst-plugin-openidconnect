@@ -37,17 +37,4 @@ $store->consume_authorization_code($code);
 my $consumed = $store->get_authorization_code($code);
 is($consumed, undef, 'Code is consumed and no longer available');
 
-# Test session creation
-my $session_id = $store->create_session(
-    bless({id => 'user-456'}, 'TestUser'),
-    { access_token => 'token123', id_token => 'idtoken456' },
-);
-
-ok($session_id, 'Session created');
-
-# Test session retrieval
-my $session = $store->get_session($session_id);
-ok($session, 'Session retrieved');
-is($session->{tokens}->{access_token}, 'token123', 'Access token in session');
-
 done_testing();

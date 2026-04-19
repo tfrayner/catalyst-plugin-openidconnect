@@ -186,43 +186,6 @@ sub verify_token {
     };
 }
 
-=head2 decode_token($token)
-
-Decodes a JWT token WITHOUT verifying the signature.
-Useful for extracting header or payload information for debugging.
-
-Warning: Do not use for security-sensitive operations.
-
-=cut
-
-sub decode_token {
-    my ( $self, $token ) = @_;
-
-    $self->logger->debug('Decoding JWT token (no verification)') if $self->logger;
-
-    return try {
-        my @parts = split /\./, $token;
-        die 'Invalid JWT format' unless @parts == 3;
-
-        my ( $header_b64, $payload_b64, $signature_b64 ) = @parts;
-
-        my $header = decode_json( _urlsafe_b64_decode($header_b64) );
-        my $payload = decode_json( _urlsafe_b64_decode($payload_b64) );
-
-        $self->logger->debug('JWT token decoded successfully') if $self->logger;
-
-        return {
-            header    => $header,
-            payload   => $payload,
-            signature => $signature_b64,
-        };
-    }
-    catch {
-        $self->logger->warn("Token decoding failed: $_") if $self->logger;
-        die "Token decoding failed: $_";
-    };
-}
-
 =head2 create_id_token(%claims)
 
 Creates a signed ID token with the specified claims.

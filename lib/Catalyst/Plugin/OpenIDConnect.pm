@@ -253,29 +253,6 @@ sub _oidc_build_jwt_handler {
     );
 }
 
-=head2 _build_jwt
-
-Lazy builder for JWT handler.
-
-=cut
-
-sub _build_jwt {
-    my ($c) = @_;
-    my $config = $c->config->{'Plugin::OpenIDConnect'} || {};
-    return $c->_oidc_build_jwt_handler($config);
-}
-
-=head2 _build_store
-
-Lazy builder for store.
-
-=cut
-
-sub _build_store {
-    my ($c) = @_;
-    return Catalyst::Plugin::OpenIDConnect::Utils::Store->new();
-}
-
 1;
 
 =head1 AUTHOR
