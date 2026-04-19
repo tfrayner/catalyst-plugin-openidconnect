@@ -1,4 +1,6 @@
 requires 'perl', '5.020';
+requires 'ExtUtils::MakeMaker' => '6.52';
+
 requires 'Catalyst';
 requires 'Catalyst::Runtime', '>= 5.90100';
 
