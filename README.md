@@ -332,21 +332,7 @@ $c->openidconnect->claims_provider(sub {
 });
 ```
 
-### Hooks and Callbacks
 
-Register callbacks at various points:
-
-```perl
-$c->openidconnect->on_authorize(sub {
-    my ($c, $client, $scope) = @_;
-    # Called after user authorizes, before issuing code
-});
-
-$c->openidconnect->on_token_issued(sub {
-    my ($c, $tokens) = @_;
-    # Called after token is issued
-});
-```
 
 ## Testing
 

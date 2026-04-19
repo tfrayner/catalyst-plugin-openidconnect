@@ -42,7 +42,6 @@ Handles JSON Web Token (JWT) operations using RS256 (RSA SHA-256).
 **Key Methods:**
 - `sign_token(%payload)` - Signs a JWT with the private key
 - `verify_token($token)` - Verifies and decodes a JWT
-- `decode_token($token)` - Decodes without verification (debug use)
 - `create_id_token(%claims)` - Creates an ID token
 - `create_access_token(%claims)` - Creates an access token
 - `create_refresh_token(%claims)` - Creates a refresh token
@@ -66,16 +65,10 @@ In-memory storage for authorization codes, sessions, and tokens.
 - `create_authorization_code()` - Creates short-lived auth codes
 - `get_authorization_code()` - Retrieves and validates codes
 - `consume_authorization_code()` - One-time use enforcement
-- `create_session()` - Creates user sessions
-- `get_session()` - Retrieves sessions
-- `cleanup_expired_codes()` - Removes expired codes
-- `cleanup_expired_sessions()` - Removes old sessions
 
 **Features:**
-- UUID-based session IDs
-- 10-minute code expiration
-- 24-hour session expiration
-- Automatic cleanup helpers
+- 10-minute authorization code expiration
+- Expired code automatic cleanup on access
 
 #### 4. **Protocol Controller** (`Catalyst::Plugin::OpenIDConnect::Controller::Root`)
 
@@ -272,21 +265,7 @@ $c->openidconnect->scope_handler(sub {
 });
 ```
 
-### Authorization Hooks
 
-Register callbacks at key points:
-
-```perl
-$c->openidconnect->on_authorize(sub {
-    my ($c, $client, $scope) = @_;
-    # Called after user authorizes, before issuing code
-});
-
-$c->openidconnect->on_token_issued(sub {
-    my ($c, $tokens) = @_;
-    # Called after tokens are issued
-});
-```
 
 ## Usage in Controllers
 
