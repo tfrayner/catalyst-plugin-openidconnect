@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.0.1] - 2026-04-16 (Bug Fixes & Integration Improvements)
+## [v0.0.2] - 2026-04-16 (Bug Fixes & Integration Improvements)
 
 ### Changed
 
@@ -35,7 +35,7 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [1.0.0] - 2024-04-10 (Initial Release)
+## [v0.0.1] - 2026-04-10 (Initial Release)
 
 ### Added
 
