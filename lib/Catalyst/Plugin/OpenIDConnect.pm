@@ -17,7 +17,7 @@ use DateTime::Format::ISO8601;
 use Data::UUID;
 use URI;
 
-our $VERSION = 'v0.0.2';
+our $VERSION = '0.02';
 
 =head1 NAME
 
