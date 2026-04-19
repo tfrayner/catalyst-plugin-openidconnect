@@ -17,7 +17,7 @@ use DateTime::Format::ISO8601;
 use Data::UUID;
 use URI;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 =head1 NAME
 
@@ -150,24 +150,33 @@ Catalyst setup hook - initialize the plugin.
 after 'setup' => sub {
     my ($app) = @_;
     
+    $app->log->debug('OpenID Connect plugin setup starting');
+    
     my $config = $app->config->{'Plugin::OpenIDConnect'} || {};
     
     # Only initialize if properly configured
     if ( $config->{issuer} && $config->{issuer}{private_key_file} ) {
         try {
+            $app->log->debug('Initializing OpenID Connect with issuer: ' . $config->{issuer}{url});
+            
             # Create JWT handler
             my $jwt = $app->_oidc_build_jwt_handler($config);
             $app->_oidc_jwt($jwt);
+            $app->log->debug('JWT handler initialized successfully');
             
             # Create store
-            my $store = Catalyst::Plugin::OpenIDConnect::Utils::Store->new();
+            my $store = Catalyst::Plugin::OpenIDConnect::Utils::Store->new(logger => $app->log);
             $app->_oidc_store($store);
+            $app->log->debug('State store initialized successfully');
             
-            $app->log->info('OpenID Connect plugin initialized');
+            $app->log->info('OpenID Connect plugin initialized successfully');
         }
         catch {
             $app->log->error("Failed to initialize OpenID Connect plugin: $_");
+            die $_;
         };
+    } else {
+        $app->log->warn('OpenID Connect plugin not configured (missing issuer.private_key_file)');
     }
 };
 
@@ -191,66 +200,57 @@ Builds and configures the JWT handler from config.
 sub _oidc_build_jwt_handler {
     my ( $c, $config ) = @_;
 
+    $c->log->debug('Building JWT handler from configuration');
+
     my $issuer_cfg = $config->{issuer} || {};
     my $issuer_url = $issuer_cfg->{url} || $c->uri_for('/')->as_string;
+
+    $c->log->debug("JWT issuer URL: $issuer_url");
 
     # Load private key
     my $private_key_file = $issuer_cfg->{private_key_file}
         or die 'issuer.private_key_file is required';
 
+    $c->log->debug("Loading private key from: $private_key_file");
+    
     open my $key_fh, '<', $private_key_file
         or die "Cannot read private key file: $!";
     my $key_data = do { local $/; <$key_fh> };
     close $key_fh;
 
     my $private_key = Crypt::OpenSSL::RSA->new_private_key($key_data);
+    $c->log->debug('Private key loaded successfully');
 
     # Load or derive public key
     my $public_key;
     if ( my $public_key_file = $issuer_cfg->{public_key_file} ) {
+        $c->log->debug("Loading public key from: $public_key_file");
+        
         open $key_fh, '<', $public_key_file
             or die "Cannot read public key file: $!";
         my $pub_data = do { local $/; <$key_fh> };
         close $key_fh;
         $public_key = Crypt::OpenSSL::RSA->new_public_key($pub_data);
+        $c->log->debug('Public key loaded successfully');
     } else {
+        $c->log->debug('Deriving public key from private key');
         # Extract public key from private key
         $public_key = Crypt::OpenSSL::RSA->new_public_key(
             $private_key->get_public_key_string()
         );
+        $c->log->debug('Public key derived successfully');
     }
 
     my $key_id = $issuer_cfg->{key_id} || 'default';
+    $c->log->debug("Using key ID: $key_id");
 
     return Catalyst::Plugin::OpenIDConnect::Utils::JWT->new(
         private_key => $private_key,
         public_key  => $public_key,
         key_id      => $key_id,
         issuer      => $issuer_url,
+        logger      => $c->log,
     );
-}
-
-=head2 _build_jwt
-
-Lazy builder for JWT handler.
-
-=cut
-
-sub _build_jwt {
-    my ($c) = @_;
-    my $config = $c->config->{'Plugin::OpenIDConnect'} || {};
-    return $c->_oidc_build_jwt_handler($config);
-}
-
-=head2 _build_store
-
-Lazy builder for store.
-
-=cut
-
-sub _build_store {
-    my ($c) = @_;
-    return Catalyst::Plugin::OpenIDConnect::Utils::Store->new();
 }
 
 1;

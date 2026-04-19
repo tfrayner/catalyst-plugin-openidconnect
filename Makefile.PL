@@ -1,6 +1,6 @@
 use strict;
 use warnings;
-use ExtUtils::MakeMaker;
+use ExtUtils::MakeMaker::CPANfile;
 
 WriteMakefile(
     NAME           => 'Catalyst::Plugin::OpenIDConnect',
@@ -8,40 +8,16 @@ WriteMakefile(
     ABSTRACT_FROM  => 'lib/Catalyst/Plugin/OpenIDConnect.pm',
     AUTHOR         => 'Tim F. Rayner <tfrayner@cpan.org>',
     LICENSE        => 'artistic_2',
-    PREREQ_PM      => {
-        'perl'                                => '5.020',
-        'Catalyst'                            => 0,
-        'Catalyst::Runtime'                   => '5.90100',
-        'Moose'                               => 0,
-        'namespace::autoclean'                => 0,
-        'JSON::MaybeXS'                       => 0,
-        'Crypt::OpenSSL::RSA'                 => '0.35', # for RSA signing/verification with JWT (openssl 3 support)
-        'Crypt::PK::RSA'                      => 0, # for JWK key parameter extraction in JWKS endpoint
-        'Digest::SHA'                         => 0,
-        'MIME::Base64'                        => 0,
-        'DateTime'                            => 0,
-        'DateTime::Format::ISO8601'           => 0,
-        'Config::General'                     => 0,
-        'URI'                                 => 0,
-        'Try::Tiny'                           => 0,
-        'Data::UUID'                          => 0,
-    },
-    TEST_REQUIRES  => {
-        'Test::More'           => '0.88',
-        'Test::Exception'      => 0,
-        'Test::MockObject'     => 0,
-        'Test::Deep'           => 0,
-    },
     META_MERGE     => {
         'meta-spec' => { version => 2 },
         resources   => {
             repository => {
                 type => 'git',
-                url  => 'https://github.com/tfrayner/perl-oidc.git',
-                web  => 'https://github.com/tfrayner/perl-oidc',
+                url  => 'https://github.com/tfrayner/catalyst-plugin-openidconnect.git',
+                web  => 'https://github.com/tfrayner/catalyst-plugin-openidconnect',
             },
             bugtracker => {
-                web => 'https://github.com/tfrayner/perl-oidc/issues',
+                web => 'https://github.com/tfrayner/catalyst-plugin-openidconnect/issues',
             },
         },
     },

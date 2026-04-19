@@ -64,7 +64,7 @@ Initiates an OpenID Connect authorization request.
 | redirect_uri | string | Yes | Where to redirect after authorization |
 | scope | string | No | Space-separated scopes (default: "openid") |
 | state | string | Recommended | CSRF protection state value |
-| nonce | string | No | Session binding nonce |
+| nonce | string | No | Session binding nonce (client validates it matches auth request) |
 | prompt | string | No | "login" to force re-authentication |
 | max_age | integer | No | Maximum age of authentication (seconds) |
 | ui_locales | string | No | Preferred UI locales |

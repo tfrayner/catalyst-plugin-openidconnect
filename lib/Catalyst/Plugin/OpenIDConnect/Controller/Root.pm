@@ -41,6 +41,7 @@ Returns the OpenID Connect provider configuration.
 sub discovery : Path('/.well-known/openid-configuration') {
     my ( $self, $c ) = @_;
 
+    $c->log->debug('OpenID Connect discovery endpoint accessed');
     $self->_json_response( $c, $c->openidconnect->get_discovery() );
 }
 
@@ -63,12 +64,16 @@ Query parameters:
 sub authorize : Local {
     my ( $self, $c ) = @_;
 
+    $c->log->debug('Authorization endpoint accessed');
+
     my $response_type = $c->request->params->{response_type};
     my $client_id     = $c->request->params->{client_id};
     my $redirect_uri  = $c->request->params->{redirect_uri};
     my $scope         = $c->request->params->{scope};
     my $state         = $c->request->params->{state};
     my $nonce         = $c->request->params->{nonce};
+
+    $c->log->debug("Authorization request - client_id: $client_id, response_type: $response_type, redirect_uri: $redirect_uri");
 
     my $stored_auth_request = $c->session->{oidc_auth_request} || {};
     $response_type //= $stored_auth_request->{response_type};
@@ -80,6 +85,7 @@ sub authorize : Local {
 
     # Validate request parameters
     unless ( $response_type && $response_type eq 'code' ) {
+        $c->log->warn("Invalid response_type: $response_type");
         return $self->_error_response(
             $c, $redirect_uri, 'invalid_request',
             'response_type must be "code"', $state
@@ -87,6 +93,7 @@ sub authorize : Local {
     }
 
     unless ($client_id) {
+        $c->log->warn('Missing client_id parameter');
         return $self->_error_response(
             $c, undef, 'invalid_request',
             'client_id is required'
@@ -94,6 +101,7 @@ sub authorize : Local {
     }
 
     unless ($redirect_uri) {
+        $c->log->warn('Missing redirect_uri parameter');
         return $self->_error_response(
             $c, undef, 'invalid_request',
             'redirect_uri is required'
@@ -103,6 +111,7 @@ sub authorize : Local {
     # Get client config
     my $client = $c->openidconnect->get_client($client_id);
     unless ($client) {
+        $c->log->error("Unknown client: $client_id");
         return $self->_error_response(
             $c, $redirect_uri, 'invalid_client',
             'Unknown client', $state
@@ -112,6 +121,7 @@ sub authorize : Local {
     # Validate redirect URI
     my @allowed_uris = split /\s+/, $client->{redirect_uris};
     unless ( grep { $_ eq $redirect_uri } @allowed_uris ) {
+        $c->log->error("Redirect URI mismatch for client $client_id: $redirect_uri");
         return $self->_error_response(
             $c, undef, 'invalid_request',
             'Redirect URI not registered'
@@ -120,6 +130,7 @@ sub authorize : Local {
 
     # Check if user is authenticated
     unless ( $c->user ) {
+        $c->log->debug('User not authenticated, redirecting to login');
         $c->session->{oidc_auth_request} = {
             response_type => $response_type,
             client_id     => $client_id,
@@ -131,6 +142,8 @@ sub authorize : Local {
 
         return $c->response->redirect( $c->uri_for('/login', { back => '/openidconnect/authorize' }) );
     }
+
+    $c->log->info("Authorization granted for user: " . $c->user->id . " to client: $client_id");
 
     # Create authorization code
     my $code = $c->openidconnect->store->create_authorization_code(
@@ -156,6 +169,7 @@ sub authorize : Local {
         state => $state,
     );
 
+    $c->log->debug("Redirecting to: " . $callback_uri->as_string);
     $c->response->redirect( $callback_uri->as_string );
 }
 
@@ -185,18 +199,23 @@ sub token : Local {
     my ( $self, $c ) = @_;
 
     $c->response->content_type('application/json');
+    $c->log->debug('Token endpoint accessed');
 
     my $grant_type = $c->request->params->{grant_type};
 
     unless ($grant_type) {
+        $c->log->warn('Missing grant_type parameter');
         return $self->_json_error( $c, 'invalid_request', 'grant_type is required' );
     }
+
+    $c->log->debug("Token request with grant_type: $grant_type");
 
     if ( $grant_type eq 'authorization_code' ) {
         return $self->_handle_authorization_code_grant($c);
     } elsif ( $grant_type eq 'refresh_token' ) {
         return $self->_handle_refresh_token_grant($c);
     } else {
+        $c->log->warn("Unsupported grant_type: $grant_type");
         return $self->_json_error( $c, 'unsupported_grant_type', "Unsupported grant_type: $grant_type" );
     }
 }
@@ -213,11 +232,14 @@ UserInfo endpoint returning authenticated user's claims.
 sub userinfo : Local {
     my ( $self, $c ) = @_;
 
+    $c->log->debug('UserInfo endpoint accessed');
+
     # Get bearer token
     my $auth_header = $c->request->header('Authorization') || '';
     my ($token) = $auth_header =~ /^Bearer\s+(\S+)$/;
 
     unless ($token) {
+        $c->log->warn('Missing or invalid Authorization header');
         return $self->_json_error( $c, 'invalid_token', 'Missing or invalid Authorization header' );
     }
 
@@ -225,16 +247,21 @@ sub userinfo : Local {
     my $payload;
     try {
         $payload = $c->openidconnect->jwt->verify_token($token);
+        $c->log->debug('Access token verified successfully');
     }
     catch {
+        $c->log->warn("Token verification failed: $_");
         return $self->_json_error( $c, 'invalid_token', "Token verification failed: $_" );
     };
 
     # Get user and claims
     my $user_id = $payload->{sub};
     unless ($user_id) {
+        $c->log->error('Token missing sub claim');
         return $self->_json_error( $c, 'invalid_token', 'Token missing sub claim' );
     }
+
+    $c->log->debug("UserInfo requested for user: $user_id");
 
     # This would normally fetch the user from database
     # For now, we'll use the claims already in the token
@@ -247,6 +274,7 @@ sub userinfo : Local {
         $claims{$claim} = $payload->{$claim} if exists $payload->{$claim};
     }
 
+    $c->log->debug('UserInfo response prepared');
     $self->_json_response( $c, \%claims );
 }
 
@@ -266,23 +294,29 @@ Parameters:
 sub logout : Local {
     my ( $self, $c ) = @_;
 
+    $c->log->debug('Logout endpoint accessed');
+
     # Clear user session
     if ( $c->user ) {
+        $c->log->info('Logging out user: ' . $c->user->id);
         $c->user->logout();
     }
 
     # Destroy session
     if ( $c->sessionid ) {
+        $c->log->debug('Destroying session: ' . $c->sessionid);
         $c->delete_session('User session destroyed');
     }
 
     my $redirect_uri = $c->request->params->{post_logout_redirect_uri};
     if ($redirect_uri) {
+        $c->log->debug("Redirecting to post-logout URI: $redirect_uri");
         # Validate redirect URI (in production, check against registered URIs)
         return $c->response->redirect($redirect_uri);
     }
 
     # Return success JSON response
+    $c->log->info('Logout completed successfully');
     $self->_json_response( $c, {
         message => 'Logged out successfully',
     });
@@ -301,9 +335,13 @@ Returns the public key(s) for verifying signatures.
 sub jwks : Local {
     my ( $self, $c ) = @_;
 
+    $c->log->debug('JWKS endpoint accessed');
+
     # Get JWT handler and public key
     my $jwt = $c->openidconnect->jwt;
     my $public_key = $jwt->public_key;
+
+    $c->log->debug('Extracting public key parameters for JWKS');
 
     # Convert OpenSSL public key to Crypt::PK::RSA for easier parameter extraction
     my $public_key_pem = $public_key->get_public_key_string();
@@ -327,6 +365,7 @@ sub jwks : Local {
         e   => $e,
     );
 
+    $c->log->debug('JWKS response prepared with key ID: ' . $jwt->key_id);
     $self->_json_response( $c, { keys => [ \%jwk ] } );
 }
 
@@ -335,18 +374,24 @@ sub jwks : Local {
 sub _handle_authorization_code_grant {
     my ( $self, $c ) = @_;
 
+    $c->log->debug('Processing authorization_code grant');
+
     my $code          = $c->request->params->{code};
     my $redirect_uri  = $c->request->params->{redirect_uri};
     my $client_id     = $c->request->params->{client_id};
     my $client_secret = $c->request->params->{client_secret};
 
     unless ( $code && $redirect_uri ) {
+        $c->log->warn('Missing code or redirect_uri in token request');
         return $self->_json_error( $c, 'invalid_request', 'code and redirect_uri are required' );
     }
+
+    $c->log->debug("Token request - code: $code, client_id: $client_id");
 
     # Get authorization code to validate and extract client_id if not provided
     my $code_data = $c->openidconnect->store->get_authorization_code($code);
     unless ($code_data) {
+        $c->log->warn("Authorization code not found or expired: $code");
         return $self->_json_error( $c, 'invalid_grant', 'Authorization code not found or expired' );
     }
 
@@ -355,25 +400,30 @@ sub _handle_authorization_code_grant {
 
     # Verify redirect URI matches
     unless ( $code_data->{redirect_uri} eq $redirect_uri ) {
+        $c->log->error("Redirect URI mismatch for code: $code (expected: " . $code_data->{redirect_uri} . ", got: $redirect_uri)");
         return $self->_json_error( $c, 'invalid_grant', 'Redirect URI mismatch' );
     }
 
     # If client_secret is provided, verify client credentials (confidential client)
     if ($client_secret) {
+        $c->log->debug("Verifying client credentials for: $client_id");
         my $client = $c->openidconnect->get_client($client_id);
         unless ( $client && $client->{client_secret} eq $client_secret ) {
+            $c->log->warn("Client authentication failed for: $client_id");
             return $self->_json_error( $c, 'invalid_client', 'Client authentication failed' );
         }
     } else {
         # For public clients (no secret provided), at least verify client exists
         my $client = $c->openidconnect->get_client($client_id);
         unless ($client) {
+            $c->log->warn("Unknown client: $client_id");
             return $self->_json_error( $c, 'invalid_client', 'Unknown client' );
         }
     }
 
     # Consume the code (one-time use)
     $c->openidconnect->store->consume_authorization_code($code);
+    $c->log->debug("Authorization code consumed: $code");
 
     # Get user claims
     my $user_claims = $c->openidconnect->get_user_claims( $code_data->{user} );
@@ -389,6 +439,7 @@ sub _handle_authorization_code_grant {
     $id_token_payload{nonce} = $code_data->{nonce} if $code_data->{nonce};
 
     my $id_token = $c->openidconnect->jwt->create_id_token(%id_token_payload);
+    $c->log->debug('ID token created');
 
     my %access_token_payload = (
         sub => $user_claims->{sub},
@@ -398,6 +449,7 @@ sub _handle_authorization_code_grant {
     );
 
     my $access_token = $c->openidconnect->jwt->create_access_token(%access_token_payload);
+    $c->log->debug('Access token created');
 
     my %refresh_token_payload = (
         sub => $user_claims->{sub},
@@ -406,6 +458,9 @@ sub _handle_authorization_code_grant {
     );
 
     my $refresh_token = $c->openidconnect->jwt->create_refresh_token(%refresh_token_payload);
+    $c->log->debug('Refresh token created');
+
+    $c->log->info("Tokens issued for client: $client_id, user: " . $user_claims->{sub});
 
     # Return tokens
     $self->_json_response( $c, {
@@ -420,17 +475,23 @@ sub _handle_authorization_code_grant {
 sub _handle_refresh_token_grant {
     my ( $self, $c ) = @_;
 
+    $c->log->debug('Processing refresh_token grant');
+
     my $refresh_token = $c->request->params->{refresh_token};
     my $client_id     = $c->request->params->{client_id};
     my $client_secret = $c->request->params->{client_secret};
 
     unless ( $refresh_token && $client_id && $client_secret ) {
+        $c->log->warn('Missing required parameters for refresh token grant');
         return $self->_json_error( $c, 'invalid_request', 'Missing required parameters' );
     }
+
+    $c->log->debug("Refresh token request for client: $client_id");
 
     # Verify client
     my $client = $c->openidconnect->get_client($client_id);
     unless ( $client && $client->{client_secret} eq $client_secret ) {
+        $c->log->warn("Client authentication failed for: $client_id");
         return $self->_json_error( $c, 'invalid_client', 'Client authentication failed' );
     }
 
@@ -438,8 +499,10 @@ sub _handle_refresh_token_grant {
     my $payload;
     try {
         $payload = $c->openidconnect->jwt->verify_token($refresh_token);
+        $c->log->debug('Refresh token verified');
     }
     catch {
+        $c->log->warn("Invalid refresh token: $_");
         return $self->_json_error( $c, 'invalid_grant', 'Invalid refresh token' );
     };
 
@@ -452,6 +515,9 @@ sub _handle_refresh_token_grant {
     );
 
     my $access_token = $c->openidconnect->jwt->create_access_token(%new_payload);
+    $c->log->debug('New access token created from refresh token');
+
+    $c->log->info("Access token refreshed for client: $client_id, user: " . $payload->{sub});
 
     $self->_json_response( $c, {
         access_token => $access_token,
@@ -463,6 +529,8 @@ sub _handle_refresh_token_grant {
 sub _error_response {
     my ( $self, $c, $redirect_uri, $error, $error_description, $state ) = @_;
 
+    $c->log->warn("OAuth error: $error - $error_description");
+
     if ($redirect_uri) {
         my $callback_uri = URI->new($redirect_uri);
         $callback_uri->query_form(
@@ -470,6 +538,7 @@ sub _error_response {
             error_description => $error_description,
             state             => $state,
         );
+        $c->log->debug("Redirecting error response to: " . $callback_uri->as_string);
         return $c->response->redirect( $callback_uri->as_string );
     } else {
         return $self->_json_response( $c, {
@@ -482,6 +551,7 @@ sub _error_response {
 sub _json_error {
     my ( $self, $c, $error, $error_description ) = @_;
 
+    $c->log->warn("JSON error response: $error - $error_description");
     $c->response->status(400);
     return $self->_json_response( $c, {
         error             => $error,

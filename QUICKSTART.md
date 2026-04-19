@@ -5,7 +5,7 @@ Get started with Catalyst::Plugin::OpenIDConnect in 5 minutes.
 ## 1. Install
 
 ```bash
-cd /path/to/perl-oidc
+cd /path/to/catalyst-plugin-openidconnect
 cpanm --installdeps .
 ```
 

@@ -56,9 +56,38 @@ has _oidc_store => (
     is  => 'rw',
 );
 
+has log => (
+    is      => 'ro',
+    isa     => 'MockLogger',
+    default => sub { MockLogger->new() },
+);
+
 sub uri_for {
     my ($self, $path) = @_;
     return bless { path => $path }, 'MockURI';
+}
+
+package MockLogger;
+use Moose;
+
+sub debug {
+    my ($self, $msg) = @_;
+    # Silently log or do nothing for testing
+}
+
+sub info {
+    my ($self, $msg) = @_;
+    # Silently log or do nothing for testing
+}
+
+sub warn {
+    my ($self, $msg) = @_;
+    # Silently log or do nothing for testing
+}
+
+sub error {
+    my ($self, $msg) = @_;
+    # Silently log or do nothing for testing
 }
 
 package MockURI;

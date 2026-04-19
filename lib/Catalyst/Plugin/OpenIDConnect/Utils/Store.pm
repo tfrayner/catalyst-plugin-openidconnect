@@ -5,8 +5,6 @@ use warnings;
 use Moose;
 use namespace::autoclean;
 
-use DateTime;
-use Data::UUID;
 use Try::Tiny;
 
 =head1 NAME
@@ -44,16 +42,16 @@ has sessions => (
     default => sub { {} },
 );
 
-=head2 uuid_gen
+=head2 logger
 
-UUID generator for creating unique IDs.
+Optional logger instance for debug/info logging.
 
 =cut
 
-has uuid_gen => (
-    is      => 'ro',
-    isa     => 'Data::UUID',
-    default => sub { Data::UUID->new() },
+has logger => (
+    is       => 'ro',
+    isa      => 'Maybe[Object]',
+    required => 0,
 );
 
 =head1 METHODS
@@ -69,6 +67,8 @@ Returns the authorization code string.
 sub create_authorization_code {
     my ( $self, $client_id, $user, $scope, $redirect_uri, $nonce ) = @_;
 
+    $self->logger->debug("Creating authorization code for client: $client_id") if $self->logger;
+
     my $code = _generate_secure_random();
 
     $self->codes->{$code} = {
@@ -80,6 +80,8 @@ sub create_authorization_code {
         created_at   => time(),
         expires_at   => time() + 600,  # 10 minutes
     };
+
+    $self->logger->debug("Authorization code created: $code (expires in 600 seconds)") if $self->logger;
 
     return $code;
 }
@@ -95,16 +97,20 @@ Returns the code data hashref or undef if not found.
 sub get_authorization_code {
     my ( $self, $code ) = @_;
 
+    $self->logger->debug("Retrieving authorization code: $code") if $self->logger;
+
     my $code_data = $self->codes->{$code};
 
     return unless $code_data;
 
     # Check if code is expired
     if ( $code_data->{expires_at} < time() ) {
+        $self->logger->warn("Authorization code expired: $code") if $self->logger;
         delete $self->codes->{$code};
         return;
     }
 
+    $self->logger->debug("Authorization code found: $code") if $self->logger;
     return $code_data;
 }
 
@@ -116,107 +122,8 @@ Consumes (removes) an authorization code after it's been exchanged for tokens.
 
 sub consume_authorization_code {
     my ( $self, $code ) = @_;
+    $self->logger->debug("Consuming authorization code: $code") if $self->logger;
     delete $self->codes->{$code};
-}
-
-=head2 create_session($user, $tokens)
-
-Creates a new user session with tokens.
-
-Returns the session ID.
-
-=cut
-
-sub create_session {
-    my ( $self, $user, $tokens ) = @_;
-
-    my $session_id = $self->uuid_gen->to_string( $self->uuid_gen->create() );
-
-    $self->sessions->{$session_id} = {
-        user       => $user,
-        tokens     => $tokens,
-        created_at => time(),
-        last_activity => time(),
-    };
-
-    return $session_id;
-}
-
-=head2 get_session($session_id)
-
-Retrieves a user session by session ID.
-
-Returns the session data hashref or undef if not found.
-
-=cut
-
-sub get_session {
-    my ( $self, $session_id ) = @_;
-    return $self->sessions->{$session_id};
-}
-
-=head2 update_session_tokens($session_id, $tokens)
-
-Updates the tokens in a session.
-
-=cut
-
-sub update_session_tokens {
-    my ( $self, $session_id, $tokens ) = @_;
-
-    my $session = $self->sessions->{$session_id};
-    return unless $session;
-
-    $session->{tokens} = $tokens;
-    $session->{last_activity} = time();
-}
-
-=head2 destroy_session($session_id)
-
-Removes a session.
-
-=cut
-
-sub destroy_session {
-    my ( $self, $session_id ) = @_;
-    delete $self->sessions->{$session_id};
-}
-
-=head2 cleanup_expired_codes
-
-Removes expired authorization codes.
-
-=cut
-
-sub cleanup_expired_codes {
-    my ($self) = @_;
-
-    my $now = time();
-    my @expired = grep { $self->codes->{$_}{expires_at} < $now }
-                  keys %{ $self->codes };
-
-    delete @{ $self->codes }{@expired};
-
-    return scalar @expired;
-}
-
-=head2 cleanup_expired_sessions($max_age)
-
-Removes sessions older than max_age seconds.
-
-=cut
-
-sub cleanup_expired_sessions {
-    my ( $self, $max_age ) = @_;
-    $max_age ||= 3600 * 24;  # 24 hours by default
-
-    my $now = time();
-    my @expired = grep { ( $now - $self->sessions->{$_}{last_activity} ) > $max_age }
-                  keys %{ $self->sessions };
-
-    delete @{ $self->sessions }{@expired};
-
-    return scalar @expired;
 }
 
 # Generate a secure random string for codes and tokens

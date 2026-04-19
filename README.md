@@ -2,6 +2,10 @@
 
 A Catalyst plugin implementing the OpenID Connect specification. This plugin provides OAuth 2.0 authentication and authorization capabilities with full OIDC compliance.
 
+**Note that this is not an OIDC client plugin**. If that is what you seek, please take a look at the [Catalyst::Plugin::OIDC](https://metacpan.org/pod/Catalyst::Plugin::OIDC) module maintained elsewhere.
+
+**Full disclosure**: this plugin has been written with the aid of Claude Haiku 4.5. A human has been included in the loop throughout, closely monitoring the agent outputs, but this is an early release and mistakes may have crept through. Please create an issue on Github if you find any errors. Thank you!
+
 ## Features
 
 - **Authorization Code Flow**: Full support for OpenID Connect authorization code flow
@@ -9,7 +13,7 @@ A Catalyst plugin implementing the OpenID Connect specification. This plugin pro
 - **UserInfo Endpoint**: Provides authenticated user information claims
 - **Discovery Endpoint**: OpenID Connect discovery (/.well-known/openid-configuration)
 - **JWT Handling**: Sign and verify JSON Web Tokens with RS256 algorithm
-- **State & Nonce**: Built-in CSRF protection and nonce validation
+- **State & Nonce**: CSRF protection via state parameter; nonce binding support (client must validate)
 - **Session Management**: User session tracking and token refresh
 - **Configurable**: Easy configuration via Catalyst config or external files
 - **Database Agnostic**: Works with any Catalyst ORM model
@@ -332,21 +336,7 @@ $c->openidconnect->claims_provider(sub {
 });
 ```
 
-### Hooks and Callbacks
 
-Register callbacks at various points:
-
-```perl
-$c->openidconnect->on_authorize(sub {
-    my ($c, $client, $scope) = @_;
-    # Called after user authorizes, before issuing code
-});
-
-$c->openidconnect->on_token_issued(sub {
-    my ($c, $tokens) = @_;
-    # Called after token is issued
-});
-```
 
 ## Testing
 
@@ -358,7 +348,7 @@ prove -l t/
 
 ## License
 
-This module is available under the same license as Perl itself.
+This module is available under The Artistic License 2.0 (GPL Compatible). See LICENSE file for details.
 
 ## Author
 

@@ -71,6 +71,18 @@ has issuer => (
     required => 1,
 );
 
+=head2 logger
+
+Optional logger instance for debug/info logging.
+
+=cut
+
+has logger => (
+    is       => 'ro',
+    isa      => 'Maybe[Object]',
+    required => 0,
+);
+
 =head1 METHODS
 
 =head2 sign_token(%payload)
@@ -84,9 +96,13 @@ Returns the complete JWT (header.payload.signature).
 sub sign_token {
     my ( $self, %payload ) = @_;
 
+    $self->logger->debug('Signing JWT token') if $self->logger;
+
     # Set standard claims
     $payload{iss} = $self->issuer unless defined $payload{iss};
     $payload{iat} = time() unless defined $payload{iat};
+
+    $self->logger->debug('JWT payload: ' . encode_json(\%payload)) if $self->logger;
 
     # Prep header
     my %header = (
@@ -109,7 +125,10 @@ sub sign_token {
     my $signature = $priv_key->sign($signing_input);
     my $signature_b64 = _urlsafe_b64_encode($signature);
 
-    return "$signing_input.$signature_b64";
+    my $token = "$signing_input.$signature_b64";
+    $self->logger->debug('JWT token signed successfully') if $self->logger;
+    
+    return $token;
 }
 
 =head2 verify_token($token)
@@ -124,11 +143,15 @@ Raises an exception on verification failure.
 sub verify_token {
     my ( $self, $token ) = @_;
 
+    $self->logger->debug('Verifying JWT token') if $self->logger;
+
     return try {
         my @parts = split /\./, $token;
         die 'Invalid JWT format' unless @parts == 3;
 
         my ( $header_b64, $payload_b64, $signature_b64 ) = @parts;
+
+        $self->logger->debug('JWT format validated (3 parts)') if $self->logger;
 
         # Verify signature (explicitly use SHA256 for RS256)
         my $signing_input = "$header_b64.$payload_b64";
@@ -141,50 +164,25 @@ sub verify_token {
             $signature
         );
 
+        $self->logger->debug('JWT signature verified') if $self->logger;
+
         # Decode payload
         my $payload_json = _urlsafe_b64_decode($payload_b64);
         my $payload = decode_json($payload_json);
+
+        $self->logger->debug('JWT payload decoded successfully') if $self->logger;
 
         # Validate claims
         die 'Token expired' if $payload->{exp} && $payload->{exp} < time();
         die 'Invalid issuer' if $payload->{iss} && $payload->{iss} ne $self->issuer;
 
+        $self->logger->debug('JWT claims validated') if $self->logger;
+
         return $payload;
     }
     catch {
+        $self->logger->warn("Token verification failed: $_") if $self->logger;
         die "Token verification failed: $_";
-    };
-}
-
-=head2 decode_token($token)
-
-Decodes a JWT token WITHOUT verifying the signature.
-Useful for extracting header or payload information for debugging.
-
-Warning: Do not use for security-sensitive operations.
-
-=cut
-
-sub decode_token {
-    my ( $self, $token ) = @_;
-
-    return try {
-        my @parts = split /\./, $token;
-        die 'Invalid JWT format' unless @parts == 3;
-
-        my ( $header_b64, $payload_b64, $signature_b64 ) = @parts;
-
-        my $header = decode_json( _urlsafe_b64_decode($header_b64) );
-        my $payload = decode_json( _urlsafe_b64_decode($payload_b64) );
-
-        return {
-            header    => $header,
-            payload   => $payload,
-            signature => $signature_b64,
-        };
-    }
-    catch {
-        die "Token decoding failed: $_";
     };
 }
 
