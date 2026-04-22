@@ -41,7 +41,9 @@ Returns the OpenID Connect provider configuration.
 sub discovery : Path('/.well-known/openid-configuration') {
     my ( $self, $c ) = @_;
 
-    $c->log->debug('OpenID Connect discovery endpoint accessed');
+    my $config = $c->openidconnect->config;
+
+    $c->log->debug('OpenID Connect discovery endpoint accessed') if $config->{debug};
     $self->_json_response( $c, $c->openidconnect->get_discovery() );
 }
 
@@ -64,7 +66,9 @@ Query parameters:
 sub authorize : Local {
     my ( $self, $c ) = @_;
 
-    $c->log->debug('Authorization endpoint accessed');
+    my $config = $c->openidconnect->config;
+
+    $c->log->debug('Authorization endpoint accessed') if $config->{debug};
 
     my $response_type = $c->request->params->{response_type};
     my $client_id     = $c->request->params->{client_id};
@@ -73,7 +77,7 @@ sub authorize : Local {
     my $state         = $c->request->params->{state};
     my $nonce         = $c->request->params->{nonce};
 
-    $c->log->debug("Authorization request - client_id: $client_id, response_type: $response_type, redirect_uri: $redirect_uri");
+    $c->log->debug("Authorization request - client_id: $client_id, response_type: $response_type, redirect_uri: $redirect_uri") if $config->{debug};
 
     my $stored_auth_request = $c->session->{oidc_auth_request} || {};
     $response_type //= $stored_auth_request->{response_type};
@@ -130,7 +134,7 @@ sub authorize : Local {
 
     # Check if user is authenticated
     unless ( $c->user ) {
-        $c->log->debug('User not authenticated, redirecting to login');
+        $c->log->debug('User not authenticated, redirecting to login') if $config->{debug};
         $c->session->{oidc_auth_request} = {
             response_type => $response_type,
             client_id     => $client_id,
@@ -169,7 +173,7 @@ sub authorize : Local {
         state => $state,
     );
 
-    $c->log->debug("Redirecting to: " . $callback_uri->as_string);
+    $c->log->debug("Redirecting to: " . $callback_uri->as_string) if $config->{debug};
     $c->response->redirect( $callback_uri->as_string );
 }
 
@@ -198,8 +202,10 @@ Returns:
 sub token : Local {
     my ( $self, $c ) = @_;
 
+    my $config = $c->openidconnect->config;
+
     $c->response->content_type('application/json');
-    $c->log->debug('Token endpoint accessed');
+    $c->log->debug('Token endpoint accessed') if $config->{debug};
 
     my $grant_type = $c->request->params->{grant_type};
 
@@ -208,7 +214,7 @@ sub token : Local {
         return $self->_json_error( $c, 'invalid_request', 'grant_type is required' );
     }
 
-    $c->log->debug("Token request with grant_type: $grant_type");
+    $c->log->debug("Token request with grant_type: $grant_type") if $config->{debug};
 
     if ( $grant_type eq 'authorization_code' ) {
         return $self->_handle_authorization_code_grant($c);
@@ -232,7 +238,8 @@ UserInfo endpoint returning authenticated user's claims.
 sub userinfo : Local {
     my ( $self, $c ) = @_;
 
-    $c->log->debug('UserInfo endpoint accessed');
+    my $config = $c->openidconnect->config;
+    $c->log->debug('UserInfo endpoint accessed') if $config->{debug};
 
     # Get bearer token
     my $auth_header = $c->request->header('Authorization') || '';
@@ -247,7 +254,7 @@ sub userinfo : Local {
     my $payload;
     try {
         $payload = $c->openidconnect->jwt->verify_token($token);
-        $c->log->debug('Access token verified successfully');
+        $c->log->debug('Access token verified successfully') if $config->{debug};
     }
     catch {
         $c->log->warn("Token verification failed: $_");
@@ -261,7 +268,7 @@ sub userinfo : Local {
         return $self->_json_error( $c, 'invalid_token', 'Token missing sub claim' );
     }
 
-    $c->log->debug("UserInfo requested for user: $user_id");
+    $c->log->debug("UserInfo requested for user: $user_id") if $config->{debug};
 
     # This would normally fetch the user from database
     # For now, we'll use the claims already in the token
@@ -274,7 +281,7 @@ sub userinfo : Local {
         $claims{$claim} = $payload->{$claim} if exists $payload->{$claim};
     }
 
-    $c->log->debug('UserInfo response prepared');
+    $c->log->debug('UserInfo response prepared') if $config->{debug};
     $self->_json_response( $c, \%claims );
 }
 
@@ -294,7 +301,9 @@ Parameters:
 sub logout : Local {
     my ( $self, $c ) = @_;
 
-    $c->log->debug('Logout endpoint accessed');
+    my $config = $c->openidconnect->config;
+
+    $c->log->debug('Logout endpoint accessed') if $config->{debug};
 
     # Clear user session
     if ( $c->user ) {
@@ -304,13 +313,13 @@ sub logout : Local {
 
     # Destroy session
     if ( $c->sessionid ) {
-        $c->log->debug('Destroying session: ' . $c->sessionid);
+        $c->log->debug('Destroying session: ' . $c->sessionid) if $config->{debug};
         $c->delete_session('User session destroyed');
     }
 
     my $redirect_uri = $c->request->params->{post_logout_redirect_uri};
     if ($redirect_uri) {
-        $c->log->debug("Redirecting to post-logout URI: $redirect_uri");
+        $c->log->debug("Redirecting to post-logout URI: $redirect_uri") if $config->{debug};
         # Validate redirect URI (in production, check against registered URIs)
         return $c->response->redirect($redirect_uri);
     }
@@ -335,13 +344,15 @@ Returns the public key(s) for verifying signatures.
 sub jwks : Local {
     my ( $self, $c ) = @_;
 
-    $c->log->debug('JWKS endpoint accessed');
+    my $config = $c->openidconnect->config;
+
+    $c->log->debug('JWKS endpoint accessed') if $config->{debug};
 
     # Get JWT handler and public key
     my $jwt = $c->openidconnect->jwt;
     my $public_key = $jwt->public_key;
 
-    $c->log->debug('Extracting public key parameters for JWKS');
+    $c->log->debug('Extracting public key parameters for JWKS') if $config->{debug};
 
     # Convert OpenSSL public key to Crypt::PK::RSA for easier parameter extraction
     my $public_key_pem = $public_key->get_public_key_string();
@@ -365,7 +376,7 @@ sub jwks : Local {
         e   => $e,
     );
 
-    $c->log->debug('JWKS response prepared with key ID: ' . $jwt->key_id);
+    $c->log->debug('JWKS response prepared with key ID: ' . $jwt->key_id) if $config->{debug};
     $self->_json_response( $c, { keys => [ \%jwk ] } );
 }
 
@@ -374,7 +385,9 @@ sub jwks : Local {
 sub _handle_authorization_code_grant {
     my ( $self, $c ) = @_;
 
-    $c->log->debug('Processing authorization_code grant');
+    my $config = $c->openidconnect->config;
+
+    $c->log->debug('Processing authorization_code grant') if $config->{debug};
 
     my $code          = $c->request->params->{code};
     my $redirect_uri  = $c->request->params->{redirect_uri};
@@ -386,7 +399,7 @@ sub _handle_authorization_code_grant {
         return $self->_json_error( $c, 'invalid_request', 'code and redirect_uri are required' );
     }
 
-    $c->log->debug("Token request - code: $code, client_id: $client_id");
+    $c->log->debug("Token request - code: $code, client_id: $client_id") if $config->{debug};
 
     # Get authorization code to validate and extract client_id if not provided
     my $code_data = $c->openidconnect->store->get_authorization_code($code);
@@ -406,7 +419,7 @@ sub _handle_authorization_code_grant {
 
     # If client_secret is provided, verify client credentials (confidential client)
     if ($client_secret) {
-        $c->log->debug("Verifying client credentials for: $client_id");
+        $c->log->debug("Verifying client credentials for: $client_id") if $config->{debug};
         my $client = $c->openidconnect->get_client($client_id);
         unless ( $client && $client->{client_secret} eq $client_secret ) {
             $c->log->warn("Client authentication failed for: $client_id");
@@ -423,7 +436,7 @@ sub _handle_authorization_code_grant {
 
     # Consume the code (one-time use)
     $c->openidconnect->store->consume_authorization_code($code);
-    $c->log->debug("Authorization code consumed: $code");
+    $c->log->debug("Authorization code consumed: $code") if $config->{debug};
 
     # Get user claims
     my $user_claims = $c->openidconnect->get_user_claims( $code_data->{user} );
@@ -439,7 +452,7 @@ sub _handle_authorization_code_grant {
     $id_token_payload{nonce} = $code_data->{nonce} if $code_data->{nonce};
 
     my $id_token = $c->openidconnect->jwt->create_id_token(%id_token_payload);
-    $c->log->debug('ID token created');
+    $c->log->debug('ID token created') if $config->{debug};
 
     my %access_token_payload = (
         sub => $user_claims->{sub},
@@ -449,7 +462,7 @@ sub _handle_authorization_code_grant {
     );
 
     my $access_token = $c->openidconnect->jwt->create_access_token(%access_token_payload);
-    $c->log->debug('Access token created');
+    $c->log->debug('Access token created') if $config->{debug};
 
     my %refresh_token_payload = (
         sub => $user_claims->{sub},
@@ -458,7 +471,7 @@ sub _handle_authorization_code_grant {
     );
 
     my $refresh_token = $c->openidconnect->jwt->create_refresh_token(%refresh_token_payload);
-    $c->log->debug('Refresh token created');
+    $c->log->debug('Refresh token created') if $config->{debug};
 
     $c->log->info("Tokens issued for client: $client_id, user: " . $user_claims->{sub});
 
@@ -475,7 +488,9 @@ sub _handle_authorization_code_grant {
 sub _handle_refresh_token_grant {
     my ( $self, $c ) = @_;
 
-    $c->log->debug('Processing refresh_token grant');
+    my $config = $c->openidconnect->config;
+
+    $c->log->debug('Processing refresh_token grant') if $config->{debug};
 
     my $refresh_token = $c->request->params->{refresh_token};
     my $client_id     = $c->request->params->{client_id};
@@ -486,7 +501,7 @@ sub _handle_refresh_token_grant {
         return $self->_json_error( $c, 'invalid_request', 'Missing required parameters' );
     }
 
-    $c->log->debug("Refresh token request for client: $client_id");
+    $c->log->debug("Refresh token request for client: $client_id") if $config->{debug};
 
     # Verify client
     my $client = $c->openidconnect->get_client($client_id);
@@ -499,7 +514,7 @@ sub _handle_refresh_token_grant {
     my $payload;
     try {
         $payload = $c->openidconnect->jwt->verify_token($refresh_token);
-        $c->log->debug('Refresh token verified');
+        $c->log->debug('Refresh token verified') if $config->{debug};
     }
     catch {
         $c->log->warn("Invalid refresh token: $_");
@@ -515,7 +530,7 @@ sub _handle_refresh_token_grant {
     );
 
     my $access_token = $c->openidconnect->jwt->create_access_token(%new_payload);
-    $c->log->debug('New access token created from refresh token');
+    $c->log->debug('New access token created from refresh token') if $config->{debug};
 
     $c->log->info("Access token refreshed for client: $client_id, user: " . $payload->{sub});
 
@@ -529,6 +544,8 @@ sub _handle_refresh_token_grant {
 sub _error_response {
     my ( $self, $c, $redirect_uri, $error, $error_description, $state ) = @_;
 
+    my $config = $c->openidconnect->config;
+
     $c->log->warn("OAuth error: $error - $error_description");
 
     if ($redirect_uri) {
@@ -538,7 +555,7 @@ sub _error_response {
             error_description => $error_description,
             state             => $state,
         );
-        $c->log->debug("Redirecting error response to: " . $callback_uri->as_string);
+        $c->log->debug("Redirecting error response to: " . $callback_uri->as_string) if $config->{debug};
         return $c->response->redirect( $callback_uri->as_string );
     } else {
         return $self->_json_response( $c, {

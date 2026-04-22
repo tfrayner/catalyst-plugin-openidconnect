@@ -35,7 +35,7 @@ Returns the JWT handler instance.
 
 sub jwt {
     my ($self) = @_;
-    $self->catalyst->log->debug('Retrieving JWT handler');
+    $self->catalyst->log->debug('Retrieving JWT handler') if $self->config->{debug};
     my $jwt = $self->catalyst->_oidc_jwt();
     unless ($jwt) {
         $self->catalyst->log->error('OpenID Connect JWT handler not initialized');
@@ -52,11 +52,11 @@ Returns the state store instance.
 
 sub store {
     my ($self) = @_;
-    $self->catalyst->log->debug('Retrieving state store');
+    $self->catalyst->log->debug('Retrieving state store') if $self->config->{debug};
     my $store = $self->catalyst->_oidc_store();
     return $store if $store;
 
-    $self->catalyst->log->debug('Creating new state store instance');
+    $self->catalyst->log->debug('Creating new state store instance') if $self->config->{debug};
     my $new_store = Catalyst::Plugin::OpenIDConnect::Utils::Store->new(logger => $self->catalyst->log);
     $self->catalyst->_oidc_store($new_store) if $self->catalyst->can('_oidc_store');
     return $new_store;
@@ -81,11 +81,11 @@ Retrieves a client configuration by client ID.
 
 sub get_client {
     my ( $self, $client_id ) = @_;
-    $self->catalyst->log->debug("Looking up client: $client_id");
+    $self->catalyst->log->debug("Looking up client: $client_id") if $self->config->{debug};
     my $clients = $self->config->{clients} || {};
     my $client = $clients->{$client_id};
     if ($client) {
-        $self->catalyst->log->debug("Found client configuration for: $client_id");
+        $self->catalyst->log->debug("Found client configuration for: $client_id") if $self->config->{debug};
     } else {
         $self->catalyst->log->warn("Client not found: $client_id");
     }
@@ -103,7 +103,7 @@ The user parameter can be a hash reference or an object with accessor methods.
 sub get_user_claims {
     my ( $self, $user ) = @_;
 
-    $self->catalyst->log->debug('Extracting user claims');
+    $self->catalyst->log->debug('Extracting user claims') if $self->config->{debug};
 
     my $claims_config = $self->config->{user_claims} || {
         sub      => 'id',
@@ -130,7 +130,7 @@ sub get_user_claims {
         $claims{$claim_name} = $value if defined $value;
     }
 
-    $self->catalyst->log->debug('User claims extracted: ' . join(', ', keys %claims));
+    $self->catalyst->log->debug('User claims extracted: ' . join(', ', keys %claims)) if $self->config->{debug};
 
     return \%claims;
 }
@@ -144,7 +144,7 @@ Returns the OpenID Connect provider configuration document.
 sub get_discovery {
     my ($self) = @_;
 
-    $self->catalyst->log->debug('Building OpenID Connect discovery document');
+    $self->catalyst->log->debug('Building OpenID Connect discovery document') if $self->config->{debug};
 
     my $c = $self->catalyst;
     my $issuer_url = $self->config->{issuer}{url} || $c->uri_for('/')->as_string;
@@ -153,7 +153,7 @@ sub get_discovery {
     my $base_url = $issuer_url;
     $base_url =~ s{/$}{};  # Remove trailing slash if present
 
-    $self->catalyst->log->debug("Discovery document built for issuer: $issuer_url");
+    $self->catalyst->log->debug("Discovery document built for issuer: $issuer_url") if $self->config->{debug};
 
     return {
         issuer                          => $issuer_url,
