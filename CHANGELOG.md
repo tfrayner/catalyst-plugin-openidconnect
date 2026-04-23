@@ -2,6 +2,78 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-04-23 (FastCGI / Multi-Process Store Support)
+
+### Added
+
+- **Catalyst::Plugin::OpenIDConnect::Role::Store** - New Moose role defining the
+  pluggable store interface. Any store backend must `with` this role and implement
+  three methods: `create_authorization_code`, `get_authorization_code`,
+  `consume_authorization_code`. This decouples the plugin from a specific
+  backend implementation.
+
+- **Catalyst::Plugin::OpenIDConnect::Utils::Store::Redis** - Redis-backed store
+  implementation for multi-process deployments (FastCGI, pre-forking servers).
+  - Stores authorization codes in Redis with native TTL expiry via `SETEX`
+  - Lazy Redis connection (opened after `fork()` so each worker has its own socket)
+  - Supports `Redis::Fast` (preferred) or `Redis` client, auto-detected at runtime
+  - Configurable key prefix for namespace isolation on shared Redis instances
+  - Configurable code TTL (default 600 s)
+  - Optional Redis `AUTH` password support
+  - Blessed user objects serialised via `convert_blessed` JSON encoding
+
+- **Configurable store class in plugin setup** - `Plugin::OpenIDConnect` config
+  now accepts `store_class` and `store_args` keys, allowing any Role::Store
+  consumer to be used as the backend without touching application code.
+
+- **`Module::Runtime::require_module`** used for dynamic store class loading,
+  replacing manual `s{::}{/}g` path mangling. Works correctly regardless of
+  `@INC` ordering or non-filesystem module sources.
+
+- **`Bytes::Random::Secure`** used for authorization code generation in both the
+  memory and Redis store backends, replacing the previous `rand`-based generator.
+  Codes are now drawn from the OS CSPRNG (`/dev/urandom`) and are safe to
+  generate after `fork()`.
+
+### Changed
+
+- **`Catalyst::Plugin::OpenIDConnect::Utils::Store`** now consumes
+  `Role::Store`, documents its multi-process limitation, and uses
+  `Bytes::Random::Secure` for code generation.
+
+- **`_oidc_store` accessor** now validates via `DOES('Role::Store')` instead of
+  `isa('Utils::Store')`, accepting any conforming backend.
+
+- **`Catalyst::Plugin::OpenIDConnect::Context::store()`** lazy initialisation
+  now respects `store_class`/`store_args` config rather than always instantiating
+  the in-memory store.
+
+- **`Module::Runtime`** added as a declared dependency in `cpanfile`.
+  `Bytes::Random::Secure` added as a core dependency. `Redis::Fast`/`Redis`
+  listed as optional recommended dependencies under the `redis` feature.
+
+### Tests
+
+- **`t/02_store.t`** extended with: Role::Store compliance check, expiry
+  enforcement, double-consume safety, CSPRNG uniqueness across 20 codes,
+  `created_at`/`expires_at` field assertions, and missing-code undef check.
+
+- **`t/04_store_redis.t`** (new) — 46 tests for the Redis store using an
+  in-process `MockRedis` stub (no live Redis required). Covers: role compliance,
+  create/get/consume lifecycle, `setex`/`del` call verification, key prefix and
+  TTL configuration, code uniqueness, and corrupt-JSON graceful handling.
+
+### Documentation
+
+- **`DEPLOYMENT.md`** updated with a new "Redis Store (FastCGI and Multi-Process
+  Deployments)" section covering installation, `catalyst.conf` and Perl hash
+  config examples, production Redis hardening checklist (auth, TLS, memory
+  policy, AOF persistence, namespacing), fork-safety explanation, custom backend
+  table, updated Docker Compose example with a `redis:7-alpine` service, and
+  three new troubleshooting entries.
+
+---
+
 ## [0.02] - 2026-04-16 (Bug Fixes & Integration Improvements)
 
 ### Changed

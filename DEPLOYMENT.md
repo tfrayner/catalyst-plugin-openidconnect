@@ -235,6 +235,124 @@ sub get_authorization_code {
 __PACKAGE__->meta->make_immutable;
 ```
 
+## Redis Store (FastCGI and Multi-Process Deployments)
+
+The default in-process memory store keeps authorization codes in a Perl hash
+inside each worker process. Under a **FastCGI** or any other pre-forking server
+this means codes created in one worker are not visible to other workers, causing
+random "invalid_grant" errors at the token endpoint.
+
+The `Catalyst::Plugin::OpenIDConnect::Utils::Store::Redis` backend solves this
+by storing codes in a shared Redis instance with automatic TTL expiry.
+
+### Installing the Redis client
+
+Install either `Redis::Fast` (recommended — XS-based, faster) or `Redis`:
+
+```bash
+cpanm Redis::Fast
+# or
+cpanm Redis
+```
+
+The store will use whichever is installed, preferring `Redis::Fast`.
+
+### Configuring the Redis store
+
+Add `store_class` and `store_args` to your `Plugin::OpenIDConnect` config block.
+
+**`catalyst.conf` (Apache-style):**
+
+```
+<Plugin::OpenIDConnect>
+    store_class = Catalyst::Plugin::OpenIDConnect::Utils::Store::Redis
+
+    <store_args>
+        server   = 127.0.0.1:6379
+        prefix   = myapp:oidc:code:
+        code_ttl = 600
+        # password = <redis-auth-password>   # omit if no AUTH required
+    </store_args>
+
+    <issuer>
+        url              = https://auth.example.com
+        private_key_file = /secure/path/private.pem
+        public_key_file  = /secure/path/public.pem
+        key_id           = prod-key-2024-01
+    </issuer>
+    ...
+</Plugin::OpenIDConnect>
+```
+
+**Perl hash config (e.g. `MyApp.pm`):**
+
+```perl
+__PACKAGE__->config(
+    'Plugin::OpenIDConnect' => {
+        store_class => 'Catalyst::Plugin::OpenIDConnect::Utils::Store::Redis',
+        store_args  => {
+            server   => $ENV{REDIS_URL} // '127.0.0.1:6379',
+            prefix   => 'myapp:oidc:code:',
+            code_ttl => 600,
+            # password => $ENV{REDIS_PASSWORD},
+        },
+        issuer => { ... },
+        ...
+    },
+);
+```
+
+### Redis server setup
+
+For production, ensure:
+
+1. **Persistence** — enable `appendonly yes` (AOF) or RDB snapshots so codes
+   survive a Redis restart within their TTL window.
+2. **Memory limit** — set `maxmemory` and `maxmemory-policy allkeys-lru` to
+   prevent unbounded growth. Authorization codes are short-lived (10 min by
+   default) so memory usage is proportional to concurrent login traffic.
+3. **Authentication** — enable `requirepass` and pass the password via
+   `store_args.password` (or an environment variable — never hardcode it).
+4. **TLS** — use Redis 6+ TLS or an stunnel/sidecar if the Redis server is not
+   on the same host as the application.
+5. **Separate namespace** — use a unique `prefix` per application to avoid key
+   collisions when multiple apps share a Redis instance.
+
+Minimal `/etc/redis/redis.conf` additions:
+
+```
+bind 127.0.0.1
+requirepass <strong-random-password>
+maxmemory 256mb
+maxmemory-policy allkeys-lru
+appendonly yes
+```
+
+### Fork-safety
+
+The Redis connection is opened **lazily** on first use, after the parent process
+has forked each worker. This means each FastCGI or pre-fork worker opens its own
+independent TCP socket — there is no shared file-descriptor that would cause
+interleaved reads/writes across processes.
+
+Do **not** instantiate a store outside of a request context (e.g. at compile
+time or during `POSIX::_exit` cleanup) when running under a pre-forking server.
+
+### Custom store backends
+
+You can implement any other backend (database, Memcached, etc.) by creating a
+class that consumes the `Catalyst::Plugin::OpenIDConnect::Role::Store` Moose
+role and implements the three required methods:
+
+| Method | Signature | Returns |
+|---|---|---|
+| `create_authorization_code` | `($client_id, $user, $scope, $redirect_uri, $nonce)` | code string |
+| `get_authorization_code` | `($code)` | `\%data` or `undef` |
+| `consume_authorization_code` | `($code)` | — |
+
+Set `store_class` to your package name and pass any constructor arguments via
+`store_args`.
+
 ## Systemd Service
 
 Create `/etc/systemd/system/oidc-catalyst.service`:
@@ -310,6 +428,9 @@ CMD ["perl", "app.pl"]
 
 ### Docker Compose
 
+The example below includes a Redis service for multi-process deployments (e.g.
+when running multiple `oidc` replicas or using a FastCGI-based server).
+
 ```yaml
 version: '3.8'
 
@@ -321,16 +442,38 @@ services:
     environment:
       CATALYST_HOME: /app
       CATALYST_ENV: production
+      REDIS_URL: redis:6379
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
     volumes:
       - ./keys:/app/keys:ro
       - ./logs:/app/logs
     restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/.well-known/openid-configuration"]
       interval: 30s
       timeout: 10s
       retries: 3
-  
+
+  redis:
+    image: redis:7-alpine
+    command: >
+      redis-server
+      --requirepass "${REDIS_PASSWORD}"
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   nginx:
     image: nginx:alpine
     ports:
@@ -341,6 +484,20 @@ services:
       - ./certs:/etc/nginx/certs:ro
     depends_on:
       - oidc
+
+volumes:
+  redis_data:
+```
+
+Store `REDIS_PASSWORD` in a `.env` file (add it to `.gitignore`) or inject it
+via your secrets manager. Reference it from your app config:
+
+```perl
+store_args => {
+    server   => $ENV{REDIS_URL}      // '127.0.0.1:6379',
+    password => $ENV{REDIS_PASSWORD} // undef,
+    prefix   => 'myapp:oidc:code:',
+},
 ```
 
 ## Monitoring
@@ -544,6 +701,19 @@ gpg --encrypt --recipient <key-id> /secure/backup/private-*.pem
 - Verify session storage is persistent (not in-memory)
 - Check session cookie settings (Secure, HttpOnly)
 - Check session expiration time
+
+**`invalid_grant` errors under FastCGI / pre-forking server**
+- The default in-memory store is per-process; codes created in one worker are
+  not visible to others. Switch to the Redis store (see [Redis Store](#redis-store-fastcgi-and-multi-process-deployments)).
+
+**Redis connection refused at startup**
+- The Redis connection is lazy — it is opened on the first request, not at boot.
+  Connection errors appear in request logs, not startup logs. Verify Redis is
+  reachable with `redis-cli -h <host> ping` from the application host.
+
+**`Neither Redis::Fast nor Redis is installed`**
+- Install one of the Redis Perl clients: `cpanm Redis::Fast` (preferred) or
+  `cpanm Redis`.
 
 ## Maintenance
 

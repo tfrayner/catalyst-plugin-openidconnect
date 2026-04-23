@@ -17,6 +17,15 @@ requires 'Config::General';
 requires 'URI';
 requires 'Try::Tiny';
 requires 'Data::UUID';
+requires 'Bytes::Random::Secure';
+requires 'Module::Runtime';
+
+# Optional: install Redis::Fast (preferred) or Redis for the Redis store backend.
+# These are not required unless you use Store::Redis.
+feature 'redis', 'Redis store backend for multi-process (FastCGI) deployments' => sub {
+    recommends 'Redis::Fast';
+    recommends 'Redis';
+};
 
 on 'test' => sub {
     requires 'Test::More', '>= 0.88';

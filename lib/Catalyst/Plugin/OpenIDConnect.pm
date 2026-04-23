@@ -8,6 +8,7 @@ use namespace::autoclean;
 use Catalyst::Plugin::OpenIDConnect::Context;
 use Catalyst::Plugin::OpenIDConnect::Utils::JWT;
 use Catalyst::Plugin::OpenIDConnect::Utils::Store;
+use Catalyst::Plugin::OpenIDConnect::Role::Store;
 use Crypt::OpenSSL::RSA;
 use Crypt::PK::RSA;
 use JSON::MaybeXS qw(encode_json decode_json);
@@ -132,8 +133,8 @@ State and code storage.
 sub _oidc_store {
     my ($self, $value) = @_;
     if (defined $value) {
-        die 'Store handler must be an instance of Catalyst::Plugin::OpenIDConnect::Utils::Store'
-            unless ref $value && $value->isa('Catalyst::Plugin::OpenIDConnect::Utils::Store');
+        die 'Store handler must implement Catalyst::Plugin::OpenIDConnect::Role::Store'
+            unless ref $value && $value->DOES('Catalyst::Plugin::OpenIDConnect::Role::Store');
         $_oidc_store_instance = $value;
     }
     return $_oidc_store_instance;
@@ -164,10 +165,25 @@ after 'setup' => sub {
             $app->_oidc_jwt($jwt);
             $app->log->debug('JWT handler initialized successfully') if $config->{debug};
             
-            # Create store
-            my $store = Catalyst::Plugin::OpenIDConnect::Utils::Store->new(logger => $app->log);
+            # Create store - class and constructor args are configurable so that
+            # shared-memory backends (e.g. Redis) can be used under FastCGI.
+            my $store_class = $config->{store_class}
+                || 'Catalyst::Plugin::OpenIDConnect::Utils::Store';
+            my $store_args  = $config->{store_args} || {};
+
+            # Dynamically load the store class (no-op if already loaded)
+            require Module::Runtime;
+            Module::Runtime::require_module($store_class);
+
+            my $store = $store_class->new(
+                logger => $app->log,
+                %$store_args,
+            );
+            die "store_class '$store_class' does not implement Role::Store"
+                unless $store->DOES('Catalyst::Plugin::OpenIDConnect::Role::Store');
+
             $app->_oidc_store($store);
-            $app->log->debug('State store initialized successfully') if $config->{debug};
+            $app->log->debug("State store initialized ($store_class)") if $config->{debug};
         }
         catch {
             $app->log->error("Failed to initialize OpenID Connect plugin: $_");

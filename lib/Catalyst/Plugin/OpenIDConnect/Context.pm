@@ -57,7 +57,18 @@ sub store {
     return $store if $store;
 
     $self->catalyst->log->debug('Creating new state store instance') if $self->config->{debug};
-    my $new_store = Catalyst::Plugin::OpenIDConnect::Utils::Store->new(logger => $self->catalyst->log);
+
+    my $store_class = $self->config->{store_class}
+        || 'Catalyst::Plugin::OpenIDConnect::Utils::Store';
+    my $store_args  = $self->config->{store_args} || {};
+
+    require Module::Runtime;
+    Module::Runtime::require_module($store_class);
+
+    my $new_store = $store_class->new(
+        logger => $self->catalyst->log,
+        %$store_args,
+    );
     $self->catalyst->_oidc_store($new_store) if $self->catalyst->can('_oidc_store');
     return $new_store;
 }

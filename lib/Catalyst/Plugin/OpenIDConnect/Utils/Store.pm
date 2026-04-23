@@ -6,15 +6,25 @@ use Moose;
 use namespace::autoclean;
 
 use Try::Tiny;
+use Bytes::Random::Secure qw(random_bytes);
+use MIME::Base64 qw(encode_base64url);
+
+with 'Catalyst::Plugin::OpenIDConnect::Role::Store';
 
 =head1 NAME
 
-Catalyst::Plugin::OpenIDConnect::Store - In-memory and pluggable store for OIDC state
+Catalyst::Plugin::OpenIDConnect::Utils::Store - In-process memory store for OIDC state
 
 =head1 DESCRIPTION
 
-Provides storage for authorization codes, tokens, and OIDC session state.
-Can be extended to use database backends.
+Provides in-process memory storage for authorization codes and OIDC session
+state. Suitable for development and single-process deployments.
+
+B<Not suitable for multi-process servers such as FastCGI or pre-forking>
+because each worker process has its own independent copy of the data.
+For those deployments, use L<Catalyst::Plugin::OpenIDConnect::Utils::Store::Redis>
+or another shared-backend store that consumes
+L<Catalyst::Plugin::OpenIDConnect::Role::Store>.
 
 =head1 ATTRIBUTES
 
@@ -126,14 +136,17 @@ sub consume_authorization_code {
     delete $self->codes->{$code};
 }
 
-# Generate a secure random string for codes and tokens
+# Generate a cryptographically secure random string for codes and tokens.
+# Uses Bytes::Random::Secure to draw from the OS CSPRNG (e.g. /dev/urandom),
+# which is safe even after fork() — important for pre-forking servers.
 sub _generate_secure_random {
-    my @chars = ( 'a' .. 'z', 'A' .. 'Z', 0 .. 9 );
-    my $code = '';
-    for ( 1 .. 128 ) {
-        $code .= $chars[ rand @chars ];
-    }
-    return $code;
+    # 120 random bytes -> 160 base64url characters; after stripping the
+    # non-alphanumeric "-" and "_" characters (roughly 3% of chars) we have
+    # well over 128 alphanumeric characters to work with.
+    my $bytes   = random_bytes(120);
+    my $encoded = encode_base64url($bytes);
+    $encoded    =~ s/[^a-zA-Z0-9]//g;
+    return substr( $encoded, 0, 128 );
 }
 
 __PACKAGE__->meta->make_immutable;
