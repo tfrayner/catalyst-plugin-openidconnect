@@ -149,15 +149,22 @@ sub authorize : Local {
 
     $c->log->info("Authorization granted for user: " . $c->user->id . " to client: $client_id");
 
+    # Extract user claims now, while the live user object is available.
+    # Storing the plain claims hashref (rather than the user object itself)
+    # means the store never needs to serialise application-specific objects
+    # such as DBIx::Class rows or LDAP entries — it always receives and
+    # returns plain data.
+    my $user_claims = $c->openidconnect->get_user_claims( $c->user );
+
     # Create authorization code
     my $code = $c->openidconnect->store->create_authorization_code(
-        $client_id, $c->user, $scope, $redirect_uri, $nonce
+        $client_id, $user_claims, $scope, $redirect_uri, $nonce
     );
 
     # Store authorization in session for later token request
     $c->session->{oidc_code}->{$code} = {
         client_id    => $client_id,
-        user         => $c->user,
+        user         => $user_claims,
         scope        => $scope,
         redirect_uri => $redirect_uri,
         nonce        => $nonce,
@@ -438,8 +445,9 @@ sub _handle_authorization_code_grant {
     $c->openidconnect->store->consume_authorization_code($code);
     $c->log->debug("Authorization code consumed: $code") if $config->{debug};
 
-    # Get user claims
-    my $user_claims = $c->openidconnect->get_user_claims( $code_data->{user} );
+    # User claims were extracted and stored at authorization time, so
+    # $code_data->{user} is already the mapped claims hashref.
+    my $user_claims = $code_data->{user};
 
     # Create tokens
     my $now = time();

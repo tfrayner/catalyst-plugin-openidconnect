@@ -57,7 +57,24 @@ sub store {
     return $store if $store;
 
     $self->catalyst->log->debug('Creating new state store instance') if $self->config->{debug};
-    my $new_store = Catalyst::Plugin::OpenIDConnect::Utils::Store->new(logger => $self->catalyst->log);
+
+    my $store_class = $self->config->{store_class}
+        || 'Catalyst::Plugin::OpenIDConnect::Utils::Store';
+    my $store_args  = { %{ $self->config->{store_args} || {} } };
+
+    # Allow the Redis password to be supplied via the environment so
+    # that secrets are not embedded in application config files.
+    if ( !exists $store_args->{password} && defined $ENV{REDIS_PASSWORD} && $ENV{REDIS_PASSWORD} ne '' ) {
+        $store_args->{password} = $ENV{REDIS_PASSWORD};
+    }
+
+    require Module::Runtime;
+    Module::Runtime::require_module($store_class);
+
+    my $new_store = $store_class->new(
+        logger => $self->catalyst->log,
+        %$store_args,
+    );
     $self->catalyst->_oidc_store($new_store) if $self->catalyst->can('_oidc_store');
     return $new_store;
 }
