@@ -5,16 +5,10 @@ use warnings;
 use Moose;
 use namespace::autoclean;
 
-use JSON::MaybeXS qw(decode_json);
+use JSON::MaybeXS qw(encode_json decode_json);
 use Bytes::Random::Secure qw(random_bytes);
 use MIME::Base64 qw(encode_base64url);
 use Try::Tiny;
-
-# Encoder that serializes blessed objects as plain hashrefs, which is necessary
-# because the 'user' field may be a Catalyst user object.  Upon retrieval from
-# Redis the user data is returned as a plain hashref; the plugin's
-# get_user_claims() already handles both hashrefs and method-bearing objects.
-my $_json = JSON::MaybeXS->new( convert_blessed => 1, allow_blessed => 1 );
 
 with 'Catalyst::Plugin::OpenIDConnect::Role::Store';
 
@@ -176,7 +170,7 @@ sub create_authorization_code {
     my $code = _generate_secure_random();
     my $now  = time();
 
-    my $data = $_json->encode({
+    my $data = encode_json({
         client_id    => $client_id,
         user         => $user,
         scope        => $scope,

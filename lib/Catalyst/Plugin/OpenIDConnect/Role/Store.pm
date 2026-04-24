@@ -14,9 +14,16 @@ All store classes (in-memory, Redis, database, etc.) must consume this role.
 
 =head1 REQUIRED METHODS
 
-=head2 create_authorization_code($client_id, $user, $scope, $redirect_uri, $nonce)
+=head2 create_authorization_code($client_id, $user_data, $scope, $redirect_uri, $nonce)
 
 Creates and persists an authorization code for the given parameters.
+
+C<$user_data> must be a plain (unblessed) hashref of the user's OIDC claims,
+as returned by C<get_user_claims()>. Callers are responsible for extracting
+claims from the live user object before calling this method; doing so here
+(rather than in the store) ensures that any application-specific user object
+— DBIx::Class row, LDAP entry, etc. — is resolved while the Catalyst context
+is still available, and that the store only ever handles plain serialisable data.
 
 Returns the authorization code string.
 

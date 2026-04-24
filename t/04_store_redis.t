@@ -22,7 +22,6 @@ for my $candidate (qw( Redis::Fast Redis )) {
 plan skip_all => 'Neither Redis::Fast nor Redis is installed'
     unless $redis_class;
 
-use Scalar::Util qw(blessed);
 use Catalyst::Plugin::OpenIDConnect::Utils::Store::Redis;
 use Catalyst::Plugin::OpenIDConnect::Role::Store;
 
@@ -102,9 +101,13 @@ is( $store->code_ttl, 600,               'code_ttl attribute set' );
 # create_authorization_code
 # ---------------------------------------------------------------------------
 
+# The store receives a plain claims hashref (as extracted by the controller
+# via get_user_claims before calling create_authorization_code).
+my $user_claims = { sub => 'user-123', name => 'Test User', email => 't@example.com' };
+
 my $code = $store->create_authorization_code(
     'test-client',
-    bless( { id => 'user-123' }, 'TestUser' ),
+    $user_claims,
     'openid profile email',
     'http://localhost:3000/callback',
     'nonce-abc',
@@ -122,7 +125,7 @@ like( $calls->[0][1], qr/^test:oidc:code:/, 'Key has correct prefix' );
 is( $calls->[0][2], 600, 'TTL is code_ttl' );
 
 # ---------------------------------------------------------------------------
-# get_authorization_code
+# get_authorization_code - field and user claims round-trip
 # ---------------------------------------------------------------------------
 
 my $data = $store->get_authorization_code($code);
@@ -133,6 +136,14 @@ is( $data->{redirect_uri}, 'http://localhost:3000/callback', 'redirect_uri match
 is( $data->{nonce},        'nonce-abc',                      'nonce matches' );
 ok( $data->{created_at},  'created_at is set' );
 ok( $data->{expires_at},  'expires_at is set' );
+
+# The user claims must survive the JSON round-trip intact so that the token
+# endpoint can use them directly to build the ID/access tokens.
+ok( ref($data->{user}) eq 'HASH',
+    'user claims are a plain hashref after Redis round-trip' );
+is( $data->{user}{sub},   'user-123',       'user.sub preserved through Redis' );
+is( $data->{user}{name},  'Test User',      'user.name preserved through Redis' );
+is( $data->{user}{email}, 't@example.com',  'user.email preserved through Redis' );
 
 is( $store->get_authorization_code('nonexistent'), undef,
     'get_authorization_code returns undef for unknown code' );
@@ -164,7 +175,7 @@ lives_ok { $store->consume_authorization_code($code) }
     my %seen;
     for ( 1 .. 20 ) {
         my $c = $s->create_authorization_code(
-            'c', bless( {}, 'U' ), 'openid', 'http://example.com/', undef );
+            'c', { sub => 'u1' }, 'openid', 'http://example.com/', undef );
         ok( !$seen{$c}, "Code $_ is unique" );
         $seen{$c}++;
     }
@@ -180,7 +191,7 @@ lives_ok { $store->consume_authorization_code($code) }
         code_ttl => 300,
     );
     my $c = $s2->create_authorization_code(
-        'client2', bless( {}, 'U' ), 'openid', 'http://example.com/cb', undef );
+        'client2', { sub => 'u2' }, 'openid', 'http://example.com/cb', undef );
 
     my $recent = $s2->_redis->recorded_calls->[-1];
     like( $recent->[1], qr/^myapp:auth:/, 'Custom prefix applied' );
