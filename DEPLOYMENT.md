@@ -312,7 +312,7 @@ For production, ensure:
    prevent unbounded growth. Authorization codes are short-lived (10 min by
    default) so memory usage is proportional to concurrent login traffic.
 3. **Authentication** — enable `requirepass` and pass the password via
-   `store_args.password` (or an environment variable — never hardcode it).
+   `store_args.password` (or the environment variable REDIS_PASSWORD — never hardcode it).
 4. **TLS** — use Redis 6+ TLS or an stunnel/sidecar if the Redis server is not
    on the same host as the application.
 5. **Separate namespace** — use a unique `prefix` per application to avoid key

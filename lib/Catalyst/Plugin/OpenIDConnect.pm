@@ -169,7 +169,13 @@ after 'setup' => sub {
             # shared-memory backends (e.g. Redis) can be used under FastCGI.
             my $store_class = $config->{store_class}
                 || 'Catalyst::Plugin::OpenIDConnect::Utils::Store';
-            my $store_args  = $config->{store_args} || {};
+            my $store_args  = { %{ $config->{store_args} || {} } };
+
+            # Allow the Redis password to be supplied via the environment so
+            # that secrets are not embedded in application config files.
+            if ( !exists $store_args->{password} && defined $ENV{REDIS_PASSWORD} && $ENV{REDIS_PASSWORD} ne '' ) {
+                $store_args->{password} = $ENV{REDIS_PASSWORD};
+            }
 
             # Dynamically load the store class (no-op if already loaded)
             require Module::Runtime;

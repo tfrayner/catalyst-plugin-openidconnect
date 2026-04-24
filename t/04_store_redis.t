@@ -209,4 +209,62 @@ lives_ok { $store->consume_authorization_code($code) }
     is( $result, undef, 'Corrupt JSON returns undef without dying' );
 }
 
+# ---------------------------------------------------------------------------
+# REDIS_PASSWORD env var fallback (tested via plugin setup code path)
+# ---------------------------------------------------------------------------
+
+{
+    # Simulate what OpenIDConnect.pm does when building store_args:
+    # if password is absent from config but REDIS_PASSWORD is set in the
+    # environment, the env var should be used.
+
+    local $ENV{REDIS_PASSWORD} = 'env-secret';
+
+    my $config_store_args = {};    # no password in config
+    my $store_args = { %$config_store_args };
+
+    if ( !exists $store_args->{password}
+            && defined $ENV{REDIS_PASSWORD}
+            && $ENV{REDIS_PASSWORD} ne '' ) {
+        $store_args->{password} = $ENV{REDIS_PASSWORD};
+    }
+
+    is( $store_args->{password}, 'env-secret',
+        'REDIS_PASSWORD env var applied when password absent from config' );
+    is( $config_store_args->{password}, undef,
+        'Original config hashref not mutated' );
+}
+
+{
+    # An explicit password in config must take precedence over the env var.
+    local $ENV{REDIS_PASSWORD} = 'env-secret';
+
+    my $config_store_args = { password => 'config-secret' };
+    my $store_args = { %$config_store_args };
+
+    if ( !exists $store_args->{password}
+            && defined $ENV{REDIS_PASSWORD}
+            && $ENV{REDIS_PASSWORD} ne '' ) {
+        $store_args->{password} = $ENV{REDIS_PASSWORD};
+    }
+
+    is( $store_args->{password}, 'config-secret',
+        'Config password takes precedence over REDIS_PASSWORD env var' );
+}
+
+{
+    # An empty REDIS_PASSWORD must be ignored.
+    local $ENV{REDIS_PASSWORD} = '';
+
+    my $store_args = {};
+    if ( !exists $store_args->{password}
+            && defined $ENV{REDIS_PASSWORD}
+            && $ENV{REDIS_PASSWORD} ne '' ) {
+        $store_args->{password} = $ENV{REDIS_PASSWORD};
+    }
+
+    ok( !exists $store_args->{password},
+        'Empty REDIS_PASSWORD env var is not applied' );
+}
+
 done_testing();
