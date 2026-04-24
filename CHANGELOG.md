@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] - 2026-04-23 (FastCGI / Multi-Process Store Support)
+## [0.03] - 2026-04-24 (FastCGI / Multi-Process Store Support)
 
 ### Added
 
