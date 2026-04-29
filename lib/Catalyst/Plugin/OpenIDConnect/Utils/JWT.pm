@@ -227,6 +227,45 @@ sub create_refresh_token {
     return $self->sign_token(%claims);
 }
 
+=head2 decode_id_token_hint($token)
+
+Decodes a JWT passed as an C<id_token_hint> during logout.
+
+Verifies the token signature against the configured public key to confirm
+it was genuinely issued by this server, but deliberately skips expiry
+validation — hint tokens are frequently expired at logout time by design.
+
+Returns a hashref of the token's claims on success, or C<undef> if the
+token is malformed or the signature cannot be verified.
+
+=cut
+
+sub decode_id_token_hint {
+    my ( $self, $token ) = @_;
+
+    return try {
+        my @parts = split /\./, $token;
+        return undef unless @parts == 3;
+
+        my ( $header_b64, $payload_b64, $signature_b64 ) = @parts;
+
+        # Verify signature — ensures the token was genuinely issued by us
+        # and was not crafted by an attacker to spoof a client_id.
+        my $signing_input = "$header_b64.$payload_b64";
+        my $signature     = _urlsafe_b64_decode($signature_b64);
+        my $pub_key       = $self->public_key;
+        $pub_key->use_sha256_hash();
+        return undef unless $pub_key->verify( $signing_input, $signature );
+
+        my $payload_json = _urlsafe_b64_decode($payload_b64);
+        return decode_json($payload_json);
+    }
+    catch {
+        $self->logger->warn("id_token_hint decode failed: $_") if $self->logger;
+        return undef;
+    };
+}
+
 # Helper: URL-safe base64 encode (RFC 4648 Section 5)
 sub _urlsafe_b64_encode {
     my ($data) = @_;

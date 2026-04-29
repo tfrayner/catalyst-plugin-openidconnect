@@ -163,21 +163,28 @@ The standard, most secure flow for web applications:
 ```perl
 <clients>
     <my-client>
-        client_secret = secret123
-        redirect_uris = http://app.example.com/callback
-        response_types = code
-        grant_types = authorization_code refresh_token
-        scope = openid profile email
+        client_secret             = secret123
+        redirect_uris             = http://app.example.com/callback
+        post_logout_redirect_uris = http://app.example.com/logged-out
+        response_types            = code
+        grant_types               = authorization_code refresh_token
+        scope                     = openid profile email
     </my-client>
 </clients>
 ```
 
 **Fields:**
 - `client_secret` - Shared secret for token endpoint
-- `redirect_uris` - Space-separated list of allowed redirect URIs
+- `redirect_uris` - Arrayref or whitespace-separated string of URIs the client is permitted to redirect to after authorization
+- `post_logout_redirect_uris` - Arrayref or whitespace-separated string of URIs the client is permitted to redirect to after logout. Required when the client uses `post_logout_redirect_uri` at the logout endpoint.
 - `response_types` - Supported response types (e.g., "code")
 - `grant_types` - Supported grant types (e.g., "authorization_code")
 - `scope` - Default/allowed scopes
+
+> Both `redirect_uris` and `post_logout_redirect_uris` accept the same formats:
+> an arrayref in YAML/JSON/Perl-hash config, or a whitespace-separated string
+> in Apache-style (`Config::General`) config. Both are matched by exact string
+> comparison — prefix matching and host-only matching are not permitted.
 
 ### User Claims Mapping
 

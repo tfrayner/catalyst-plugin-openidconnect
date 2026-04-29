@@ -59,6 +59,7 @@ Create/update `catalyst.conf`:
         <my-app>
             client_secret = <randomly-generated-secret>
             redirect_uris = https://app.example.com/callback https://app.example.com/oauth/callback
+            post_logout_redirect_uris = https://app.example.com/logged-out
             response_types = code
             grant_types = authorization_code refresh_token
             scope = openid profile email

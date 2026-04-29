@@ -43,8 +43,9 @@ __PACKAGE__->config(
         },
         clients => {
             'my-client' => {
-                client_secret => 'my-secret',
-                redirect_uris => 'http://localhost:3000/callback',
+                client_secret             => 'my-secret',
+                redirect_uris             => ['http://localhost:3000/callback'],
+                post_logout_redirect_uris => ['http://localhost:3000/logged-out'],
             },
         },
     },

@@ -123,7 +123,7 @@ sub authorize : Local {
     }
 
     # Validate redirect URI
-    my @allowed_uris = split /\s+/, $client->{redirect_uris};
+    my @allowed_uris = _normalize_uri_list( $client->{redirect_uris} );
     unless ( grep { $_ eq $redirect_uri } @allowed_uris ) {
         $c->log->error("Redirect URI mismatch for client $client_id: $redirect_uri");
         return $self->_error_response(
@@ -298,10 +298,19 @@ POST /openidconnect/logout
 
 Logout endpoint to invalidate tokens and clear sessions.
 
+Implements OpenID Connect RP-Initiated Logout 1.0.
+
 Parameters:
-  - id_token_hint: The ID token being logged out
-  - post_logout_redirect_uri: Where to redirect after logout
-  - state: State parameter for redirect
+  - id_token_hint (REQUIRED when post_logout_redirect_uri is supplied): A
+    previously issued ID Token identifying the client requesting logout.
+    The token's signature is verified to confirm it was issued by this server.
+    Expiry is intentionally not checked — hint tokens are often expired.
+  - post_logout_redirect_uri (OPTIONAL): URL to redirect to after logout.
+    Must be registered in the client's C<post_logout_redirect_uris> list.
+    Providing this parameter without a valid C<id_token_hint> is rejected
+    with an C<invalid_request> error to prevent open-redirect attacks.
+  - state (OPTIONAL): Opaque value returned verbatim in the redirect query
+    string (only when post_logout_redirect_uri is also provided).
 
 =cut
 
@@ -324,11 +333,63 @@ sub logout : Local {
         $c->delete_session('User session destroyed');
     }
 
-    my $redirect_uri = $c->request->params->{post_logout_redirect_uri};
+    my $redirect_uri   = $c->request->params->{post_logout_redirect_uri};
+    my $id_token_hint  = $c->request->params->{id_token_hint};
+    my $state          = $c->request->params->{state};
+
     if ($redirect_uri) {
-        $c->log->debug("Redirecting to post-logout URI: $redirect_uri") if $config->{debug};
-        # Validate redirect URI (in production, check against registered URIs)
-        return $c->response->redirect($redirect_uri);
+        # id_token_hint is required when a redirect is requested so that we
+        # can identify the client and verify the URI is registered for it.
+        # Without this check an attacker could redirect to any arbitrary URL.
+        unless ($id_token_hint) {
+            $c->log->warn('post_logout_redirect_uri provided without id_token_hint');
+            return $self->_json_error( $c, 'invalid_request',
+                'id_token_hint is required when post_logout_redirect_uri is provided' );
+        }
+
+        # Decode the hint token (signature verified, expiry ignored).
+        my $hint_claims = $c->openidconnect->jwt->decode_id_token_hint($id_token_hint);
+        unless ($hint_claims) {
+            $c->log->warn('Invalid id_token_hint provided at logout');
+            return $self->_json_error( $c, 'invalid_request', 'Invalid id_token_hint' );
+        }
+
+        # aud may be a string or an array per RFC 7519 §4.1.3.
+        my $aud       = $hint_claims->{aud};
+        my $client_id = ref $aud eq 'ARRAY' ? $aud->[0] : $aud;
+
+        unless ($client_id) {
+            $c->log->warn('id_token_hint is missing the aud claim');
+            return $self->_json_error( $c, 'invalid_request',
+                'id_token_hint does not contain an aud claim' );
+        }
+
+        # Look up the client and validate the redirect URI against its
+        # registered post_logout_redirect_uris list.
+        my $client = $c->openidconnect->get_client($client_id);
+        unless ($client) {
+            $c->log->warn("Unknown client in id_token_hint aud claim: $client_id");
+            return $self->_json_error( $c, 'invalid_request',
+                'Unknown client in id_token_hint' );
+        }
+
+        my @allowed = _normalize_uri_list( $client->{post_logout_redirect_uris} );
+        unless ( grep { $_ eq $redirect_uri } @allowed ) {
+            $c->log->warn(
+                "Unregistered post_logout_redirect_uri for client $client_id: $redirect_uri"
+            );
+            return $self->_json_error( $c, 'invalid_request',
+                'post_logout_redirect_uri is not registered for this client' );
+        }
+
+        # Build the final redirect URI, appending state if supplied.
+        my $final_uri = URI->new($redirect_uri);
+        $final_uri->query_form( $final_uri->query_form, state => $state )
+            if defined $state && $state ne '';
+
+        $c->log->debug( 'Redirecting to post-logout URI: ' . $final_uri->as_string )
+            if $config->{debug};
+        return $c->response->redirect( $final_uri->as_string );
     }
 
     # Return success JSON response
@@ -336,6 +397,18 @@ sub logout : Local {
     $self->_json_response( $c, {
         message => 'Logged out successfully',
     });
+}
+
+# Normalise a redirect-URI config field.
+# Accepts either an arrayref (YAML / JSON / Perl hash config) or a
+# whitespace-delimited string (Config::General / Apache-style config).
+# Returns a flat list of URI strings.
+# Used for both redirect_uris and post_logout_redirect_uris so that both
+# fields behave identically regardless of config format.
+sub _normalize_uri_list {
+    my ($field) = @_;
+    return () unless defined $field;
+    return ref $field eq 'ARRAY' ? @$field : split /\s+/, $field;
 }
 
 =head2 jwks

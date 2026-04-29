@@ -2,6 +2,76 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.04] - 2026-04-29 (Security Fix: Open Redirect in Logout Endpoint)
+
+### Security
+
+- **CRIT-1 fixed — Open Redirect in logout endpoint** (`Controller::Root`,
+  `Utils::JWT`). The `post_logout_redirect_uri` parameter was previously
+  forwarded without any validation, allowing an attacker to redirect victims to
+  an arbitrary external URL after logout (phishing / credential harvesting).
+
+  The logout flow now enforces the following rules, in line with OpenID Connect
+  RP-Initiated Logout 1.0:
+
+  1. `post_logout_redirect_uri` is rejected with `invalid_request` unless
+     `id_token_hint` is also supplied.
+  2. The hint token's RSA signature is verified to confirm it was genuinely
+     issued by this server. Expiry is intentionally **not** checked — hint
+     tokens are frequently expired at logout time by design.
+  3. The `aud` claim of the verified hint identifies the requesting client.
+     The `post_logout_redirect_uri` is then compared by **exact string match**
+     against that client's registered `post_logout_redirect_uris` list.
+     Prefix matching and host-only matching are not permitted.
+  4. Any mismatch returns an `invalid_request` OAuth error; no redirect is
+     issued.
+  5. When a redirect is permitted, the optional `state` parameter is appended
+     verbatim to the redirect URI as required by the specification.
+
+### Added
+
+- **`JWT::decode_id_token_hint($token)`** — new method on
+  `Catalyst::Plugin::OpenIDConnect::Utils::JWT`. Verifies the token signature
+  against the configured public key and returns the decoded claims hashref, or
+  `undef` if the token is malformed or the signature is invalid. Distinct from
+  `verify_token` in that it does not reject expired tokens.
+
+- **`Controller::Root::_allowed_post_logout_uris($client)`** — private helper
+  that normalises the `post_logout_redirect_uris` client config field from
+  either an arrayref (YAML/JSON config) or a whitespace-delimited string
+  (Config::General-style config) into a flat list of URIs.
+
+- **`post_logout_redirect_uris` client config key** — each client may now
+  declare a list of permitted post-logout redirect URIs. This key is required
+  for clients that use `post_logout_redirect_uri` at the logout endpoint.
+
+### Tests
+
+- **`t/05_logout.t`** (new, 19 tests) — covers `decode_id_token_hint` for valid
+  tokens, expired tokens, tampered tokens, wrong-key tokens, and structurally
+  invalid JWTs; and `_allowed_post_logout_uris` for arrayref config, string
+  config, missing config, and exact-match security semantics (prefix-of-registered
+  and extended-path attacks).
+
+### Documentation
+
+- **`API_REFERENCE.md`** — Logout endpoint section rewritten with updated
+  parameter table (marking `id_token_hint` as conditionally required), security
+  note on exact-match validation, split request/response examples, full error
+  response examples, and a client registration code snippet.
+- **`README.md`** — Client configuration reference updated with the new
+  `post_logout_redirect_uris` field.
+- **`IMPLEMENTATION_GUIDE.md`** — Client configuration example and field list
+  updated with `post_logout_redirect_uris`.
+- **`DEPLOYMENT.md`** — Production `catalyst.conf` example updated with
+  `post_logout_redirect_uris`.
+- **`QUICKSTART.md`** — Quick-start Perl config example updated with
+  `post_logout_redirect_uris`.
+- **`example/app.pl`** — Both example clients now include
+  `post_logout_redirect_uris`.
+
+---
+
 ## [0.03] - 2026-04-24 (FastCGI / Multi-Process Store Support)
 
 ### Added

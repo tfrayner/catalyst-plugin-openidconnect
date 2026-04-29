@@ -36,18 +36,23 @@ __PACKAGE__->config(
         # Client configurations
         clients => {
             'example-client' => {
-                client_secret => 'example-client-secret',
-                redirect_uris => 'http://localhost:3000/callback',
-                response_types => 'code',
-                grant_types => 'authorization_code refresh_token',
-                scope => 'openid profile email',
+                client_secret             => 'example-client-secret',
+                redirect_uris             => ['http://localhost:3000/callback'],
+                post_logout_redirect_uris => ['http://localhost:3000/logged-out'],
+                response_types            => 'code',
+                grant_types               => 'authorization_code refresh_token',
+                scope                     => 'openid profile email',
             },
             'test-app' => {
-                client_secret => 'test-secret-12345',
-                redirect_uris => 'http://localhost:8080/auth/callback http://localhost:8080/callback',
-                response_types => 'code',
-                grant_types => 'authorization_code refresh_token',
-                scope => 'openid profile email phone',
+                client_secret             => 'test-secret-12345',
+                redirect_uris             => [
+                    'http://localhost:8080/auth/callback',
+                    'http://localhost:8080/callback',
+                ],
+                post_logout_redirect_uris => ['http://localhost:8080/logout-complete'],
+                response_types            => 'code',
+                grant_types               => 'authorization_code refresh_token',
+                scope                     => 'openid profile email phone',
             },
         },
         

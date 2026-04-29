@@ -320,17 +320,20 @@ Host: localhost:5000
 
 ### POST /openidconnect/logout
 
-Logs out the user and invalidates their session.
+Logs out the user and invalidates their session. Implements [OpenID Connect
+RP-Initiated Logout 1.0](https://openid.net/specs/openid-connect-rpinitiated-1_0.html).
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| id_token_hint | string | No | The user's ID token |
-| post_logout_redirect_uri | string | No | Where to redirect after logout |
-| state | string | No | State for redirect |
+| id_token_hint | string | Conditional | A previously issued ID Token. **Required** when `post_logout_redirect_uri` is supplied. The token's signature is verified to identify the client; expiry is intentionally not checked. |
+| post_logout_redirect_uri | string | No | URI to redirect to after logout. Must be registered in the client's `post_logout_redirect_uris` list. Requires `id_token_hint`. |
+| state | string | No | Opaque value returned verbatim in the redirect (only when `post_logout_redirect_uri` is also provided). |
 
-**Example Request:**
+> **Security note:** Providing `post_logout_redirect_uri` without a valid `id_token_hint` is rejected with `invalid_request`. The redirect URI is validated by exact string match against the client's registered `post_logout_redirect_uris` list — prefix matching and host-only matching are not permitted.
+
+**Example Request (with redirect):**
 
 ```
 POST /openidconnect/logout HTTP/1.1
@@ -338,24 +341,78 @@ Host: localhost:5000
 Content-Type: application/x-www-form-urlencoded
 
 id_token_hint=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...&
-post_logout_redirect_uri=https://app.example.com/&
+post_logout_redirect_uri=https://app.example.com/logged-out&
 state=xyz789
 ```
 
-**Success Response:**
+**Example Request (without redirect):**
 
-If `post_logout_redirect_uri` is provided:
+```
+POST /openidconnect/logout HTTP/1.1
+Host: localhost:5000
+Content-Type: application/x-www-form-urlencoded
+
+id_token_hint=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Success Response — redirect:**
 ```
 HTTP/1.1 302 Found
-Location: https://app.example.com/?state=xyz789
+Location: https://app.example.com/logged-out?state=xyz789
 ```
 
-Otherwise:
+**Success Response — no redirect:**
+```json
+{
+  "message": "Logged out successfully"
+}
 ```
-HTTP/1.1 200 OK
-Content-Type: text/plain
 
-Logged out successfully
+**Error Responses:**
+
+```json
+{
+  "error": "invalid_request",
+  "error_description": "id_token_hint is required when post_logout_redirect_uri is provided"
+}
+```
+
+```json
+{
+  "error": "invalid_request",
+  "error_description": "post_logout_redirect_uri is not registered for this client"
+}
+```
+
+**Error Codes:**
+
+| Code | Description |
+|------|-------------|
+| invalid_request | `post_logout_redirect_uri` supplied without `id_token_hint`, hint token invalid, client unknown, or URI not registered |
+
+**Client registration requirement:**
+
+To use `post_logout_redirect_uri`, each client must declare its permitted
+post-logout redirect URIs in the server configuration:
+
+```
+# catalyst.conf (Apache-style)
+<clients>
+    <my-app>
+        post_logout_redirect_uris = https://app.example.com/logged-out
+    </my-app>
+</clients>
+```
+
+```perl
+# Perl hash config
+clients => {
+    'my-app' => {
+        post_logout_redirect_uris => [
+            'https://app.example.com/logged-out',
+        ],
+    },
+},
 ```
 
 ---
