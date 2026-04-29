@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.08] - 2026-04-29 (Security Fix: MED-6)
+
+### Security
+
+- **MED-6 fixed — Missing HTTP security headers on all responses**
+  (`Controller::Root`).  A `begin : Private` action now runs before every OIDC
+  endpoint and sets five response headers:
+  - `Cache-Control: no-store` — mandatory per RFC 6749 §5.1 on token responses;
+    applied globally so future endpoints cannot accidentally omit it.
+  - `Pragma: no-cache` — HTTP/1.0 compatibility.
+  - `X-Content-Type-Options: nosniff` — prevents MIME-type sniffing on all
+    OIDC responses.
+  - `X-Frame-Options: DENY` — guards the authorization endpoint HTML page
+    against clickjacking.
+  - `Content-Security-Policy: frame-ancestors 'none'` — modern equivalent of
+    `X-Frame-Options` for browsers that support CSP Level 2+.
+
 ## [0.07] - 2026-04-29 (Security Fix: MED-1)
 
 ### Security

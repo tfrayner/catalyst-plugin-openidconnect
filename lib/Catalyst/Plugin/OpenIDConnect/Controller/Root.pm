@@ -36,6 +36,31 @@ Handles OpenID Connect protocol endpoints:
 
 =cut
 
+=head2 begin
+
+Called automatically before every action in this controller.  Sets HTTP
+security headers that must be present on all OIDC endpoint responses (MED-6).
+
+=cut
+
+sub begin : Private {
+    my ( $self, $c ) = @_;
+
+    # RFC 6749 §5.1 requires Cache-Control: no-store on token responses;
+    # applied globally so new endpoints can't accidentally omit it.
+    # Pragma: no-cache is the HTTP/1.0 equivalent.
+    $c->response->header( 'Cache-Control'          => 'no-store' );
+    $c->response->header( 'Pragma'                 => 'no-cache' );
+
+    # Prevent MIME sniffing.
+    $c->response->header( 'X-Content-Type-Options' => 'nosniff' );
+
+    # Clickjacking protection on the authorize endpoint HTML page.
+    # Both headers are set for broadest browser compatibility (MED-6).
+    $c->response->header( 'X-Frame-Options'        => 'DENY' );
+    $c->response->header( 'Content-Security-Policy' => "frame-ancestors 'none'" );
+}
+
 =head2 discovery
 
 GET /.well-known/openid-configuration

@@ -296,6 +296,12 @@ delete $c->session->{oidc_code}->{$code};
 
 ### MED-6 — Missing HTTP Security Headers on All Responses
 
+> **Fixed (2026-04-29)** — A `begin : Private` action in `Controller::Root`
+> now sets `Cache-Control: no-store`, `Pragma: no-cache`,
+> `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and
+> `Content-Security-Policy: frame-ancestors 'none'` on every OIDC endpoint
+> response before the action body runs.  See `[0.08]` in `CHANGELOG.md`.
+
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`
 
 **Description:**  
