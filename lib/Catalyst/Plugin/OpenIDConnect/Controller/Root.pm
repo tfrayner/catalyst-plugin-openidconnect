@@ -6,7 +6,8 @@ use namespace::autoclean;
 BEGIN { extends 'Catalyst::Controller'; }
 
 use JSON::MaybeXS qw(encode_json decode_json);
-use MIME::Base64 qw(encode_base64 decode_base64);
+use MIME::Base64 qw(encode_base64 decode_base64 encode_base64url);
+use Digest::SHA qw(sha256);
 use Crypt::PK::RSA;
 use Crypt::Misc qw(slow_eq);
 use URI;
@@ -71,22 +72,26 @@ sub authorize : Local {
 
     $c->log->debug('Authorization endpoint accessed') if $config->{debug};
 
-    my $response_type = $c->request->params->{response_type};
-    my $client_id     = $c->request->params->{client_id};
-    my $redirect_uri  = $c->request->params->{redirect_uri};
-    my $scope         = $c->request->params->{scope};
-    my $state         = $c->request->params->{state};
-    my $nonce         = $c->request->params->{nonce};
+    my $response_type        = $c->request->params->{response_type};
+    my $client_id            = $c->request->params->{client_id};
+    my $redirect_uri         = $c->request->params->{redirect_uri};
+    my $scope                = $c->request->params->{scope};
+    my $state                = $c->request->params->{state};
+    my $nonce                = $c->request->params->{nonce};
+    my $code_challenge       = $c->request->params->{code_challenge};
+    my $code_challenge_method = $c->request->params->{code_challenge_method};
 
     $c->log->debug("Authorization request - client_id: $client_id, response_type: $response_type, redirect_uri: $redirect_uri") if $config->{debug};
 
     my $stored_auth_request = $c->session->{oidc_auth_request} || {};
-    $response_type //= $stored_auth_request->{response_type};
-    $client_id     //= $stored_auth_request->{client_id};
-    $redirect_uri  //= $stored_auth_request->{redirect_uri};
-    $scope         ||= $stored_auth_request->{scope} || 'openid';
-    $state         //= $stored_auth_request->{state};
-    $nonce         //= $stored_auth_request->{nonce};
+    $response_type         //= $stored_auth_request->{response_type};
+    $client_id             //= $stored_auth_request->{client_id};
+    $redirect_uri          //= $stored_auth_request->{redirect_uri};
+    $scope                 ||= $stored_auth_request->{scope} || 'openid';
+    $state                 //= $stored_auth_request->{state};
+    $nonce                 //= $stored_auth_request->{nonce};
+    $code_challenge        //= $stored_auth_request->{code_challenge};
+    $code_challenge_method //= $stored_auth_request->{code_challenge_method};
 
     # Validate request parameters
     unless ( $response_type && $response_type eq 'code' ) {
@@ -137,18 +142,43 @@ sub authorize : Local {
     unless ( $c->user ) {
         $c->log->debug('User not authenticated, redirecting to login') if $config->{debug};
         $c->session->{oidc_auth_request} = {
-            response_type => $response_type,
-            client_id     => $client_id,
-            redirect_uri  => $redirect_uri,
-            scope         => $scope,
-            state         => $state,
-            nonce         => $nonce,
+            response_type         => $response_type,
+            client_id             => $client_id,
+            redirect_uri          => $redirect_uri,
+            scope                 => $scope,
+            state                 => $state,
+            nonce                 => $nonce,
+            code_challenge        => $code_challenge,
+            code_challenge_method => $code_challenge_method,
         };
 
         return $c->response->redirect( $c->uri_for('/login', { back => '/openidconnect/authorize' }) );
     }
 
     $c->log->info("Authorization granted for user: " . $c->user->id . " to client: $client_id");
+
+    # PKCE validation (RFC 7636, OAuth 2.1).
+    # Public clients (no client_secret) MUST supply a code_challenge.
+    # Confidential clients MAY supply one; if they do, it is validated.
+    # Only S256 is accepted — 'plain' provides no meaningful security.
+    my $is_public_client = !( $client->{client_secret} && length $client->{client_secret} );
+    if ( $is_public_client && !$code_challenge ) {
+        $c->log->warn("PKCE code_challenge required for public client: $client_id");
+        return $self->_error_response(
+            $c, $redirect_uri, 'invalid_request',
+            'code_challenge is required for public clients', $state
+        );
+    }
+    if ( $code_challenge ) {
+        my $method = $code_challenge_method // 'plain';
+        unless ( $method eq 'S256' ) {
+            $c->log->warn("Unsupported code_challenge_method '$method' for client: $client_id");
+            return $self->_error_response(
+                $c, $redirect_uri, 'invalid_request',
+                'code_challenge_method must be S256', $state
+            );
+        }
+    }
 
     # Extract user claims now, while the live user object is available.
     # Storing the plain claims hashref (rather than the user object itself)
@@ -157,18 +187,24 @@ sub authorize : Local {
     # returns plain data.
     my $user_claims = $c->openidconnect->get_user_claims( $c->user );
 
-    # Create authorization code
+    # Create authorization code, passing any PKCE challenge so it is stored
+    # alongside the code and can be verified at the token endpoint.
+    my $pkce = $code_challenge
+        ? { code_challenge => $code_challenge, code_challenge_method => 'S256' }
+        : undef;
     my $code = $c->openidconnect->store->create_authorization_code(
-        $client_id, $user_claims, $scope, $redirect_uri, $nonce
+        $client_id, $user_claims, $scope, $redirect_uri, $nonce, $pkce
     );
 
     # Store authorization in session for later token request
     $c->session->{oidc_code}->{$code} = {
-        client_id    => $client_id,
-        user         => $user_claims,
-        scope        => $scope,
-        redirect_uri => $redirect_uri,
-        nonce        => $nonce,
+        client_id             => $client_id,
+        user                  => $user_claims,
+        scope                 => $scope,
+        redirect_uri          => $redirect_uri,
+        nonce                 => $nonce,
+        code_challenge        => $code_challenge,
+        code_challenge_method => $code_challenge ? 'S256' : undef,
     };
 
     # Clear the stored authorization request after resuming the flow.
@@ -400,6 +436,19 @@ sub logout : Local {
     });
 }
 
+# Verify a PKCE code_verifier against a stored code_challenge.
+# Only S256 (SHA-256) is supported; 'plain' is intentionally rejected.
+# Returns a true value on success, false on failure.
+sub _verify_pkce {
+    my ( $code_verifier, $code_challenge ) = @_;
+    return 0 unless defined $code_verifier && defined $code_challenge;
+    # Verifier must contain only unreserved URI chars and be 43-128 chars (RFC 7636 §4.1)
+    return 0 unless $code_verifier =~ /\A[A-Za-z0-9\-._~]{43,128}\z/;
+    # S256: BASE64URL( SHA256( ASCII( code_verifier ) ) )
+    my $computed = encode_base64url( sha256($code_verifier) );
+    return slow_eq( $computed, $code_challenge );
+}
+
 # Normalise a redirect-URI config field.
 # Accepts either an arrayref (YAML / JSON / Perl hash config) or a
 # whitespace-delimited string (Config::General / Apache-style config).
@@ -474,6 +523,7 @@ sub _handle_authorization_code_grant {
     my $redirect_uri  = $c->request->params->{redirect_uri};
     my $client_id     = $c->request->params->{client_id};
     my $client_secret = $c->request->params->{client_secret};
+    my $code_verifier = $c->request->params->{code_verifier};
 
     unless ( $code && $redirect_uri ) {
         $c->log->warn('Missing code or redirect_uri in token request');
@@ -502,6 +552,19 @@ sub _handle_authorization_code_grant {
     unless ( $code_data->{redirect_uri} eq $redirect_uri ) {
         $c->log->error("Redirect URI mismatch for code: $code (expected: " . $code_data->{redirect_uri} . ", got: $redirect_uri)");
         return $self->_json_error( $c, 'invalid_grant', 'Redirect URI mismatch' );
+    }
+
+    # PKCE verification (RFC 7636)
+    if ( $code_data->{code_challenge} ) {
+        unless ( defined $code_verifier ) {
+            $c->log->warn("PKCE code_verifier missing for client: $client_id");
+            return $self->_json_error( $c, 'invalid_grant', 'code_verifier is required' );
+        }
+        unless ( _verify_pkce( $code_verifier, $code_data->{code_challenge} ) ) {
+            $c->log->warn("PKCE verification failed for client: $client_id");
+            return $self->_json_error( $c, 'invalid_grant', 'code_verifier is invalid' );
+        }
+        $c->log->debug('PKCE verification passed') if $config->{debug};
     }
 
     # If client_secret is provided, verify client credentials (confidential client)

@@ -14,7 +14,7 @@ All store classes (in-memory, Redis, database, etc.) must consume this role.
 
 =head1 REQUIRED METHODS
 
-=head2 create_authorization_code($client_id, $user_data, $scope, $redirect_uri, $nonce)
+=head2 create_authorization_code($client_id, $user_data, $scope, $redirect_uri, $nonce, $pkce)
 
 Creates and persists an authorization code for the given parameters.
 
@@ -24,6 +24,11 @@ claims from the live user object before calling this method; doing so here
 (rather than in the store) ensures that any application-specific user object
 — DBIx::Class row, LDAP entry, etc. — is resolved while the Catalyst context
 is still available, and that the store only ever handles plain serialisable data.
+
+C<$pkce> is an optional hashref with keys C<code_challenge> and
+C<code_challenge_method>. When supplied the values are stored alongside the
+code so that the token endpoint can verify the RFC 7636 PKCE proof. Omit or
+pass C<undef> for flows that do not use PKCE.
 
 Returns the authorization code string.
 

@@ -285,4 +285,34 @@ lives_ok { $store->consume_authorization_code($code) }
         'Empty REDIS_PASSWORD env var is not applied' );
 }
 
+# ---------------------------------------------------------------------------
+# PKCE: code_challenge stored and returned through Redis JSON round-trip
+# ---------------------------------------------------------------------------
+
+{
+    my $ps = MockRedisStore->new( prefix => 'pkce:' );
+    my $pc = $ps->create_authorization_code(
+        'pkce-client',
+        { sub => 'u1' },
+        'openid',
+        'http://localhost:3000/callback',
+        undef,
+        { code_challenge => 'xyz789challenge', code_challenge_method => 'S256' },
+    );
+    my $pd = $ps->consume_authorization_code($pc);
+    ok( $pd, 'PKCE code created and consumed via Redis mock' );
+    is( $pd->{code_challenge},        'xyz789challenge', 'code_challenge round-trips through Redis JSON' );
+    is( $pd->{code_challenge_method}, 'S256',            'code_challenge_method round-trips through Redis JSON' );
+}
+
+# Without PKCE the fields are absent
+{
+    my $ns = MockRedisStore->new( prefix => 'nopkce:' );
+    my $nc = $ns->create_authorization_code(
+        'no-pkce', { sub => 'u2' }, 'openid', 'http://example.com/cb', undef,
+    );
+    my $nd = $ns->consume_authorization_code($nc);
+    ok( !$nd->{code_challenge}, 'No code_challenge in Redis when PKCE not used' );
+}
+
 done_testing();

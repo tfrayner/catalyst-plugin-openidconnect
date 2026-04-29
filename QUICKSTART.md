@@ -99,9 +99,11 @@ sub login : Local {
         if ($username) {
             $c->session->{user} = { username => $username, id => $username };
 
-            # Redirect to 'back' parameter to resume OIDC flow
+            # Redirect to 'back' parameter to resume OIDC flow.
+            # Validate it to prevent open redirect (only allow relative paths).
             my $back = $c->request->params->{back} || '/';
-            return $c->response->redirect($back);
+            $back = '/' unless $back =~ m{^/[^/]};
+            return $c->response->redirect( $c->uri_for($back) );
         }
 
         $c->stash->{error} = 'Username required';

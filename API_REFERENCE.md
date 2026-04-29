@@ -65,6 +65,8 @@ Initiates an OpenID Connect authorization request.
 | scope | string | No | Space-separated scopes (default: "openid") |
 | state | string | Recommended | CSRF protection state value |
 | nonce | string | No | Session binding nonce (client validates it matches auth request) |
+| code_challenge | string | Conditional | PKCE challenge value (RFC 7636). **Required for public clients** (those without a `client_secret`). Strongly recommended for all clients. Value is `BASE64URL(SHA256(ASCII(code_verifier)))`. |
+| code_challenge_method | string | Conditional | Must be `S256` when `code_challenge` is provided. `plain` is not supported. |
 | prompt | string | No | "login" to force re-authentication |
 | max_age | integer | No | Maximum age of authentication (seconds) |
 | ui_locales | string | No | Preferred UI locales |
@@ -135,7 +137,8 @@ Exchanges an authorization code or refresh token for tokens.
 | code | string | Yes | The authorization code |
 | redirect_uri | string | Yes | Must match authorization request |
 | client_id | string | Yes | The client identifier |
-| client_secret | string | Yes | The client secret |
+| client_secret | string | Conditional | The client secret. Omit for public clients (those without a registered `client_secret`). |
+| code_verifier | string | Conditional | PKCE verifier string (43–128 unreserved URI characters). Required when `code_challenge` was sent in the authorization request. |
 
 **Example Request:**
 
@@ -576,6 +579,53 @@ Response:
   "refresh_token": "tGzv3JOkF0XG5Qx2TlKWIA"
 }
 ```
+
+---
+
+### PKCE-Protected Authorization Code Flow (RFC 7636)
+
+PKCE (Proof Key for Code Exchange) protects the authorization code grant against
+interception attacks. It is **required for public clients** and recommended for all clients.
+
+#### 1. Generate Verifier and Challenge
+
+```bash
+# code_verifier: 43-128 random unreserved URI characters
+CODE_VERIFIER=$(openssl rand -base64 60 | tr -d '+/=' | head -c 64)
+
+# code_challenge: BASE64URL(SHA256(ASCII(code_verifier)))
+CODE_CHALLENGE=$(printf '%s' "$CODE_VERIFIER" | openssl dgst -sha256 -binary | openssl base64 | tr '+/' '-_' | tr -d '=')
+```
+
+#### 2. Initiate Authorization with Challenge
+
+```bash
+curl -G "http://localhost:5000/openidconnect/authorize" \
+  --data-urlencode "response_type=code" \
+  --data-urlencode "client_id=my-public-client" \
+  --data-urlencode "redirect_uri=http://app.example.com/callback" \
+  --data-urlencode "scope=openid profile" \
+  --data-urlencode "state=random-state" \
+  --data-urlencode "code_challenge=$CODE_CHALLENGE" \
+  --data-urlencode "code_challenge_method=S256"
+```
+
+#### 3. Exchange Code Using Verifier (no `client_secret` for public clients)
+
+```bash
+curl -X POST http://localhost:5000/openidconnect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=authorization_code" \
+  -d "code=<auth_code>" \
+  -d "redirect_uri=http://app.example.com/callback" \
+  -d "client_id=my-public-client" \
+  -d "code_verifier=$CODE_VERIFIER"
+```
+
+Confidential clients with a `client_secret` can also use PKCE — include both
+`client_secret` and `code_verifier`.
+
+---
 
 #### 3. Get User Information
 

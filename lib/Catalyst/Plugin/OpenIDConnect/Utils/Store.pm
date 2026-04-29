@@ -66,29 +66,35 @@ has logger => (
 
 =head1 METHODS
 
-=head2 create_authorization_code($client_id, $user, $scope, $redirect_uri, $nonce)
+=head2 create_authorization_code($client_id, $user, $scope, $redirect_uri, $nonce, $pkce)
 
-Creates an authorization code for the given parameters.
+Creates an authorization code for the given parameters.  C<$pkce> is an
+optional hashref with keys C<code_challenge> and C<code_challenge_method>;
+omit or pass C<undef> for non-PKCE flows.
 
 Returns the authorization code string.
 
 =cut
 
 sub create_authorization_code {
-    my ( $self, $client_id, $user, $scope, $redirect_uri, $nonce ) = @_;
+    my ( $self, $client_id, $user, $scope, $redirect_uri, $nonce, $pkce ) = @_;
 
     $self->logger->debug("Creating authorization code for client: $client_id") if $self->logger;
 
     my $code = _generate_secure_random();
 
     $self->codes->{$code} = {
-        client_id    => $client_id,
-        user         => $user,
-        scope        => $scope,
-        redirect_uri => $redirect_uri,
-        nonce        => $nonce,
-        created_at   => time(),
-        expires_at   => time() + 600,  # 10 minutes
+        client_id             => $client_id,
+        user                  => $user,
+        scope                 => $scope,
+        redirect_uri          => $redirect_uri,
+        nonce                 => $nonce,
+        created_at            => time(),
+        expires_at            => time() + 600,  # 10 minutes
+        ( $pkce ? (
+            code_challenge        => $pkce->{code_challenge},
+            code_challenge_method => $pkce->{code_challenge_method},
+        ) : () ),
     };
 
     $self->logger->debug("Authorization code created: $code (expires in 600 seconds)") if $self->logger;

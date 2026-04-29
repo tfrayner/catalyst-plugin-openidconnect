@@ -62,13 +62,13 @@ In-memory storage for authorization codes, sessions, and tokens.
 - Can be extended for database backends
 
 **Key Methods:**
-- `create_authorization_code()` - Creates short-lived auth codes
-- `get_authorization_code()` - Retrieves and validates codes
-- `consume_authorization_code()` - One-time use enforcement
+- `create_authorization_code($client_id, $user, $scope, $redirect_uri, $nonce, $pkce)` - Creates short-lived auth codes; accepts an optional `$pkce` hashref with `code_challenge` and `code_challenge_method` fields
+- `consume_authorization_code($code)` - Atomically fetches and deletes the code (one-step); returns the code data hashref or `undef` if not found or expired
 
 **Features:**
 - 10-minute authorization code expiration
-- Expired code automatic cleanup on access
+- Atomic fetch-and-delete prevents TOCTOU races (in-memory uses `delete`; Redis uses `GETDEL`)
+- PKCE `code_challenge` persisted with the code and returned by `consume_authorization_code`
 
 #### 4. **Protocol Controller** (`Catalyst::Plugin::OpenIDConnect::Controller::Root`)
 
@@ -99,6 +99,8 @@ The standard, most secure flow for web applications:
    - scope
    - state (CSRF protection)
    - nonce (optional, binds to session)
+   - code_challenge (required for public clients; recommended for all — see PKCE below)
+   - code_challenge_method=S256 (required when code_challenge is supplied)
 
 2. User authenticates (handled by application)
 
@@ -109,7 +111,8 @@ The standard, most secure flow for web applications:
    - code
    - redirect_uri
    - client_id
-   - client_secret
+   - client_secret (omit for public clients)
+   - code_verifier (required when code_challenge was sent in step 1)
 
 5. Server verifies and issues:
    - id_token (JWT with user claims)
@@ -381,9 +384,11 @@ sub login : Local {
             $c->session->{user_id} = $user->id;
 
             # IMPORTANT: Redirect to the 'back' parameter if provided
-            # This resumes the authorization flow after authentication
+            # This resumes the authorization flow after authentication.
+            # Validate it to prevent open redirect (only allow relative paths).
             my $back = $c->request->params->{back} || '/';
-            return $c->response->redirect($back);
+            $back = '/' unless $back =~ m{^/[^/]};
+            return $c->response->redirect( $c->uri_for($back) );
         }
 
         $c->stash->{error} = 'Invalid credentials';
@@ -420,6 +425,14 @@ The plugin will redirect to your login page like: `/login?back=/openidconnect/au
 - Authorization codes are one-time use only
 - Codes expire after 10 minutes
 - Code exchange requires client authentication
+- Atomic fetch-and-delete in the store layer prevents TOCTOU race conditions
+
+### PKCE (Proof Key for Code Exchange — RFC 7636)
+- Public clients (those without a registered `client_secret`) **must** send `code_challenge` and `code_challenge_method=S256` in the authorization request
+- Confidential clients are also strongly encouraged to use PKCE
+- Only the `S256` method is supported; `plain` is rejected per OAuth 2.1 / security BCP
+- The verifier must be 43–128 characters using only unreserved URI characters (`A-Z`, `a-z`, `0-9`, `-`, `.`, `_`, `~`)
+- The server verifies `BASE64URL(SHA256(ASCII(code_verifier))) == code_challenge` with a constant-time comparison before issuing tokens
 
 ## Testing
 

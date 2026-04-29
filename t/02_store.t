@@ -120,4 +120,35 @@ lives_ok { $store->consume_authorization_code($code) }
     }
 }
 
+# ---------------------------------------------------------------------------
+# PKCE: code_challenge stored and returned by consume
+# ---------------------------------------------------------------------------
+
+{
+    my $ps = Catalyst::Plugin::OpenIDConnect::Utils::Store->new();
+    my $pc = $ps->create_authorization_code(
+        'pkce-client',
+        bless( { id => 'u1' }, 'TestUser' ),
+        'openid',
+        'http://localhost:3000/callback',
+        undef,
+        { code_challenge => 'abc123challenge', code_challenge_method => 'S256' },
+    );
+    my $pd = $ps->consume_authorization_code($pc);
+    ok( $pd, 'PKCE code created and consumed' );
+    is( $pd->{code_challenge},        'abc123challenge', 'code_challenge stored and returned' );
+    is( $pd->{code_challenge_method}, 'S256',            'code_challenge_method stored and returned' );
+}
+
+# Without PKCE the fields are absent
+{
+    my $ns = Catalyst::Plugin::OpenIDConnect::Utils::Store->new();
+    my $nc = $ns->create_authorization_code(
+        'no-pkce-client', bless( {}, 'TestUser' ), 'openid',
+        'http://example.com/cb', undef,
+    );
+    my $nd = $ns->consume_authorization_code($nc);
+    ok( !$nd->{code_challenge}, 'No code_challenge when PKCE not used' );
+}
+
 done_testing();

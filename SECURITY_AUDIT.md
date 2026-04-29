@@ -163,6 +163,8 @@ my $data = $self->_redis->eval(
 
 ### HIGH-5 — No PKCE Support for Public Client Flows
 
+> **Fixed (2026-04-29)** — Full RFC 7636 PKCE support added. Authorize endpoint reads `code_challenge`/`code_challenge_method`, persists them through the login-redirect session, requires `code_challenge` for public clients (those without a `client_secret`), rejects `plain` method (only `S256` accepted), and stores the challenge with the code. Token endpoint reads `code_verifier`, verifies S256 before issuing tokens. `_verify_pkce` enforces length (43–128) and character constraints. Both store backends persist `code_challenge`/`code_challenge_method`. Tests in `t/06_pkce.t` (11 tests), `t/02_store.t`, and `t/04_store_redis.t`.
+
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`
 
 **Description:**  
