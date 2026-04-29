@@ -299,4 +299,66 @@ is_deeply($empty_context->config, {}, 'empty config returns empty hashref');
 my $empty_client = $empty_context->get_client('any-client');
 is($empty_client, undef, 'get_client() handles empty clients config');
 
+# ---------------------------------------------------------------------------
+# MED-3: JWT and Store instances are isolated per consuming application class
+# ---------------------------------------------------------------------------
+
+{
+    my $app_a = bless {}, 'FakeAppAlpha';
+    my $app_b = bless {}, 'FakeAppBeta';
+
+    # Create a second distinct JWT instance for app_b
+    my $rsa_b = Crypt::OpenSSL::RSA->generate_key(1024);
+    my $jwt_b = Catalyst::Plugin::OpenIDConnect::Utils::JWT->new(
+        private_key => $rsa_b,
+        public_key  => Crypt::OpenSSL::RSA->new_public_key( $rsa_b->get_public_key_string() ),
+        key_id      => 'key-b',
+        issuer      => 'http://b.example.com',
+    );
+
+    Catalyst::Plugin::OpenIDConnect::_oidc_jwt( $app_a, $jwt );
+    Catalyst::Plugin::OpenIDConnect::_oidc_jwt( $app_b, $jwt_b );
+
+    is(
+        Catalyst::Plugin::OpenIDConnect::_oidc_jwt($app_a), $jwt,
+        'MED-3: FakeAppAlpha holds its own JWT instance',
+    );
+    is(
+        Catalyst::Plugin::OpenIDConnect::_oidc_jwt($app_b), $jwt_b,
+        'MED-3: FakeAppBeta holds its own JWT instance',
+    );
+    isnt(
+        Catalyst::Plugin::OpenIDConnect::_oidc_jwt($app_a),
+        Catalyst::Plugin::OpenIDConnect::_oidc_jwt($app_b),
+        'MED-3: JWT instances are isolated between application classes',
+    );
+}
+
+# ---------------------------------------------------------------------------
+# MED-4: Implicit grant/response types removed from discovery document
+# ---------------------------------------------------------------------------
+
+{
+    my $grant_types    = $discovery->{grant_types_supported};
+    my $response_types = $discovery->{response_types_supported};
+
+    ok(
+        !grep { $_ eq 'implicit' } @$grant_types,
+        'MED-4: implicit not in grant_types_supported',
+    );
+    ok(
+        scalar( grep { $_ eq 'authorization_code' } @$grant_types ),
+        'authorization_code still in grant_types_supported',
+    );
+
+    ok(
+        !grep { $_ eq 'id_token' || $_ eq 'token' } @$response_types,
+        'MED-4: implicit response types (id_token, token) not in response_types_supported',
+    );
+    ok(
+        scalar( grep { $_ eq 'code' } @$response_types ),
+        'code still in response_types_supported',
+    );
+}
+
 done_testing();

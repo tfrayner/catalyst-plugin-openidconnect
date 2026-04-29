@@ -192,6 +192,8 @@ Store refresh token identifiers (the `jti` claim) in the same backend store used
 
 ### MED-2 — Sensitive Claims Logged at Debug Level
 
+> **Fixed (2026-04-29)** — The `sign_token` debug log statement now emits only `sub`, `aud`, and `exp` metadata. PII-bearing claims (email, name, etc.) are never written to the log. 4 new tests added to `t/01_jwt.t` verify the log message does not contain the email or name fields.
+
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Utils/JWT.pm`  
 **Location:** `sign_token`
 
@@ -216,6 +218,8 @@ $self->logger->debug(sprintf(
 
 ### MED-3 — Thread-Unsafe Package-Level Global State
 
+> **Fixed (2026-04-29)** — Replaced `our $_oidc_jwt_instance` and `our $_oidc_store_instance` package-level globals with per-application-class lexical hashes (`%_oidc_jwt_by_class`, `%_oidc_store_by_class`) keyed by `ref($self) || $self`. Multiple Catalyst applications loaded in the same Perl interpreter each hold their own JWT and store instances and cannot overwrite each other's state. 3 new tests in `t/03_plugin.t` verify isolation.
+
 **File:** `lib/Catalyst/Plugin/OpenIDConnect.pm`
 
 **Description:**  
@@ -238,6 +242,8 @@ __PACKAGE__->mk_classdata('_oidc_store');
 
 ### MED-4 — Implicit Grant Type Advertised as Supported
 
+> **Fixed (2026-04-29)** — `implicit` removed from `grant_types_supported`; `id_token` and `token` response types removed from `response_types_supported`. Discovery document now advertises only `authorization_code` and `refresh_token` grants, and only `code` as a response type. 4 new tests in `t/03_plugin.t` verify the absence of implicit types.
+
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Context.pm`  
 **Location:** `get_discovery`
 
@@ -254,6 +260,8 @@ Remove `implicit` from `grant_types_supported` and `response_types_supported` in
 ---
 
 ### MED-5 — Session Entry `oidc_code` Is Never Cleaned Up
+
+> **Fixed (2026-04-29)** — `_handle_authorization_code_grant` now calls `delete $c->session->{oidc_code}->{$code}` immediately after `consume_authorization_code` succeeds. The session copy is removed regardless of whether the subsequent token-issuance steps succeed or fail, ensuring stale claims, scope, and nonce data do not accumulate in the session store.
 
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`  
 **Location:** `authorize` action

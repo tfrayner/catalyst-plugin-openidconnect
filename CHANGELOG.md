@@ -2,6 +2,53 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.06] - 2026-04-29 (Security Fixes: MED-2, MED-3, MED-4, MED-5)
+
+### Security
+
+- **MED-2 fixed — Sensitive claims logged at debug level** (`Utils::JWT`).
+  `sign_token` previously serialised the entire JWT payload (which may include
+  PII such as email addresses, names, and user identifiers) to the debug log.
+  The log statement now emits only non-sensitive metadata: `sub`, `aud`, and
+  `exp`. PII-bearing claims are never written to any log output.
+
+- **MED-3 fixed — Package-level global state shared across application classes**
+  (`Catalyst::Plugin::OpenIDConnect`). The JWT handler and store were stored in
+  `our $_oidc_jwt_instance` / `our $_oidc_store_instance` — package-level
+  globals shared across all Catalyst applications in the same interpreter.
+  These are replaced by per-application-class lexical hashes
+  (`%_oidc_jwt_by_class`, `%_oidc_store_by_class`) keyed by the consuming
+  class name (`ref($self) || $self`). Multiple Catalyst apps in the same process
+  now each hold their own isolated JWT and store instances.
+
+- **MED-4 fixed — Implicit grant/response types advertised in discovery**
+  (`Context`). The discovery document listed `implicit` in
+  `grant_types_supported` and `id_token`/`token` values in
+  `response_types_supported`. The implicit flow is deprecated by OAuth 2.0
+  Security BCP (RFC 9700) and removed from OAuth 2.1. Both lists now advertise
+  only the flows this server actually implements: `authorization_code` and
+  `refresh_token` grants, and `code` as the sole response type.
+
+- **MED-5 fixed — Session copy of authorization code never cleaned up**
+  (`Controller::Root`). The authorize endpoint wrote a copy of each issued code
+  and its associated claims/scope/nonce into `$c->session->{oidc_code}`. This
+  entry was never removed, causing stale PII to accumulate in the session store
+  indefinitely. `_handle_authorization_code_grant` now calls
+  `delete $c->session->{oidc_code}->{$code}` immediately after the code is
+  successfully consumed.
+
+### Tests
+
+- **`t/01_jwt.t`** (4 new tests, 24 total) — MED-2: capturing logger verifies
+  the `sign_token` debug message does not contain email or name fields, and does
+  contain `sub` and `aud`.
+- **`t/03_plugin.t`** (7 new tests) — MED-3: two distinct "application class"
+  objects verified to hold isolated JWT instances; MED-4: discovery document
+  verified to not contain `implicit` in grant types or implicit response types,
+  and to still contain `authorization_code` / `code`.
+
+---
+
 ## [0.05] - 2026-04-29 (Security Fixes: HIGH-1 through HIGH-5)
 
 ### Security

@@ -206,4 +206,42 @@ lives_ok {
     $jwt->verify_token($no_aud_token);
 } 'Token without aud accepted when no expected_audience is required';
 
+# ---------------------------------------------------------------------------
+# MED-2: Debug log must not expose PII-bearing claims
+# ---------------------------------------------------------------------------
+
+{
+    {
+        package CapturingLogger;
+        sub new   { bless { msgs => [] }, shift }
+        sub debug { push @{ $_[0]{msgs} }, $_[1] }
+    }
+    my $cap_logger = CapturingLogger->new();
+
+    my $logging_jwt = Catalyst::Plugin::OpenIDConnect::Utils::JWT->new(
+        private_key => $private_key,
+        public_key  => $public_key,
+        key_id      => 'test-key',
+        issuer      => 'http://localhost:5000',
+        logger      => $cap_logger,
+    );
+
+    $logging_jwt->sign_token(
+        sub   => 'uid-42',
+        aud   => 'my-client',
+        exp   => time() + 3600,
+        email => 'private@example.com',
+        name  => 'Private User',
+    );
+
+    my $all_log = join( ' ', @{ $cap_logger->{msgs} } );
+
+    unlike( $all_log, qr/private\@example\.com/,
+        'MED-2: email address not written to debug log' );
+    unlike( $all_log, qr/Private User/,
+        'MED-2: name not written to debug log' );
+    like( $all_log, qr/uid-42/, 'MED-2: sub written to debug log' );
+    like( $all_log, qr/my-client/, 'MED-2: aud written to debug log' );
+}
+
 done_testing();

@@ -545,6 +545,10 @@ sub _handle_authorization_code_grant {
     }
     $c->log->debug("Authorization code consumed: $code") if $config->{debug};
 
+    # Remove session copy of this code so stale claims/scope/nonce do not
+    # accumulate in the session store beyond the code's 10-minute lifetime (MED-5).
+    delete $c->session->{oidc_code}->{$code};
+
     # Use client_id from authorization code if not provided in request (public client flow)
     $client_id ||= $code_data->{client_id};
 

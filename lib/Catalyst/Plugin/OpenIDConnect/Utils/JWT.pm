@@ -102,7 +102,13 @@ sub sign_token {
     $payload{iss} = $self->issuer unless defined $payload{iss};
     $payload{iat} = time() unless defined $payload{iat};
 
-    $self->logger->debug('JWT payload: ' . encode_json(\%payload)) if $self->logger;
+    # Log only non-sensitive metadata — never log PII-bearing claims (MED-2).
+    if ( $self->logger ) {
+        $self->logger->debug( sprintf(
+            'Signing JWT: sub=%s aud=%s exp=%s',
+            $payload{sub} // '?', $payload{aud} // '?', $payload{exp} // '?',
+        ));
+    }
 
     # Prep header
     my %header = (
