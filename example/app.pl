@@ -151,8 +151,13 @@ sub login : Local {
             # IMPORTANT: The 'back' parameter is used by the OpenID Connect plugin
             # to resume the authorization flow after successful authentication.
             # Always redirect to it if provided to properly complete the OIDC flow.
+            #
+            # Security: restrict 'back' to relative paths on this server only.
+            # Reject absolute URLs and protocol-relative URLs (e.g. //evil.example.com/)
+            # to prevent open-redirect attacks (HIGH-1).
             my $back = $c->request->params->{back} || '/';
-            return $c->response->redirect($back);
+            $back = '/' unless $back =~ m{^/[^/]};
+            return $c->response->redirect( $c->uri_for($back) );
         }
 
         $c->stash->{error} = 'Invalid username';
