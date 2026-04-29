@@ -2,6 +2,104 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.05] - 2026-04-29 (Security Fixes: HIGH-1 through HIGH-5)
+
+### Security
+
+- **HIGH-1 fixed — Open Redirect in example login action** (`example/app.pl`).
+  The `back` parameter was forwarded to `$c->response->redirect` without
+  validation, allowing an attacker to craft a login URL that redirected the
+  victim to an arbitrary external site after authentication. The parameter is
+  now validated with `m{^/[^/]}` (must start with `/` followed by a
+  non-`/` character) to reject both absolute URLs and protocol-relative `//`
+  paths, and the redirect is issued via `$c->uri_for($back)`.
+
+- **HIGH-2 fixed — Missing mandatory JWT claim validation** (`Utils::JWT`).
+  `verify_token` previously only checked `exp` and `iss` when those claims were
+  present. Both are now mandatory: tokens missing `exp` or `iss` are rejected;
+  an expired `exp` is always rejected; an `iss` that does not match the
+  configured issuer URL is rejected; `nbf` (not-before), when present, is
+  enforced. An optional `expected_audience` parameter was also added: when
+  supplied, the `aud` claim must be present and must match.
+
+- **HIGH-3 fixed — Timing-vulnerable client secret comparison** (`Controller::Root`).
+  The `eq` operator was used to compare client secrets at the token endpoint,
+  leaking secret length and prefix information through timing side-channels.
+  Both the authorization-code grant and the refresh-token grant now use
+  `Crypt::Misc::slow_eq()` for constant-time comparison. `Crypt::Misc` added to
+  `cpanfile`.
+
+- **HIGH-4 fixed — TOCTOU race in authorization code redemption** (`Utils::Store`,
+  `Utils::Store::Redis`, `Controller::Root`). The previous implementation called
+  `get_authorization_code` followed by a separate `consume_authorization_code`,
+  creating a window where two concurrent requests could both read the same code
+  before either deleted it. `consume_authorization_code` is now a single atomic
+  operation that fetches and deletes in one step (Perl `delete` for the
+  in-memory store; Redis `GETDEL` (≥ 6.2) for the Redis store) and returns the
+  code data hashref. The controller now calls only `consume_authorization_code`;
+  the two-step pattern has been removed. `Role::Store` updated accordingly.
+
+- **HIGH-5 fixed — No PKCE support** (`Controller::Root`, `Utils::Store`,
+  `Utils::Store::Redis`, `Role::Store`). Full RFC 7636 PKCE implementation added:
+
+  - **Authorize endpoint**: reads `code_challenge` and `code_challenge_method`
+    from request parameters; persists them in the session so they survive the
+    login redirect; enforces that public clients (those without a `client_secret`)
+    **must** supply `code_challenge`; rejects any method other than `S256`
+    (`plain` is not supported per OAuth 2.1 / security BCP); stores the
+    challenge with the authorization code in both store backends.
+  - **Token endpoint**: reads `code_verifier` from the POST body; after atomically
+    consuming the code, verifies the challenge with
+    `BASE64URL(SHA256(ASCII(code_verifier))) == code_challenge` using a
+    constant-time comparison (`Crypt::Misc::slow_eq`); returns `invalid_grant`
+    on failure.
+  - **`_verify_pkce($verifier, $challenge)`** — private helper enforces verifier
+    format (43–128 unreserved URI characters: `A-Z`, `a-z`, `0-9`, `-`, `.`,
+    `_`, `~`) before computing and comparing the S256 challenge.
+  - Both `Utils::Store` and `Utils::Store::Redis` accept an optional `$pkce`
+    hashref in `create_authorization_code` and persist `code_challenge` /
+    `code_challenge_method` with the code entry.
+
+### Tests
+
+- **`t/01_jwt.t`** (10 new tests, 20 total) — tests for `verify_token` mandatory
+  claim enforcement: missing `exp`, expired token, missing `iss`, wrong issuer,
+  future `nbf`, past `nbf`, `expected_audience` match, wrong audience, missing
+  `aud` with `expected_audience`, missing `aud` without `expected_audience`.
+
+- **`t/02_store.t`** (updated) — `consume_authorization_code` verified to return
+  code data; second consume verified to return `undef`. Added PKCE round-trip
+  tests: `code_challenge`/`code_challenge_method` stored and returned; no-PKCE
+  case verified to leave those fields absent.
+
+- **`t/04_store_redis.t`** (updated) — `MockRedis` gained a `getdel` method;
+  tests confirm `GETDEL` is used (not `del`), consume returns data, second
+  consume returns `undef`. Added PKCE round-trip tests through JSON
+  serialization.
+
+- **`t/06_pkce.t`** (new, 11 tests) — unit tests for `_verify_pkce`: correct
+  verifier/challenge pair accepted; wrong verifier rejected; verifier too short
+  (< 43) rejected; verifier too long (> 128) rejected; verifier with disallowed
+  characters rejected; `undef` verifier rejected; `undef` challenge rejected;
+  minimum (43-char) and maximum (128-char) length cases accepted; all unreserved
+  char types accepted; tampered challenge rejected.
+
+### Documentation
+
+- **`API_REFERENCE.md`** — Authorization endpoint parameter table updated with
+  `code_challenge` (Conditional) and `code_challenge_method` rows; token
+  endpoint authorization-code grant table updated with `code_verifier`
+  (Conditional) row and `client_secret` changed from Required to Conditional.
+  New "PKCE-Protected Authorization Code Flow" example section added.
+- **`IMPLEMENTATION_GUIDE.md`** — Authorization Code Flow steps updated with
+  PKCE parameters; State Store module docs updated with accurate signatures and
+  atomic-operation note; login action example updated with safe `back`
+  validation; new PKCE subsection added under Security Considerations.
+- **`QUICKSTART.md`** — Login action example updated with validated `back`
+  redirect pattern.
+
+---
+
 ## [0.04] - 2026-04-29 (Security Fix: Open Redirect in Logout Endpoint)
 
 ### Security
