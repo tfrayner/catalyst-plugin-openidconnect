@@ -74,6 +74,8 @@ $c->response->redirect( $c->uri_for($back) );
 
 ### HIGH-2 — JWT Claims Validated Only When Present (Missing Mandatory Checks)
 
+> **Fixed (2026-04-29)** — `verify_token` now unconditionally requires and validates `exp` and `iss`. `nbf` is enforced when present. An optional `expected_audience` parameter enables `aud` validation. 10 new tests added to `t/01_jwt.t` covering all cases.
+
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Utils/JWT.pm`  
 **Location:** `verify_token`
 

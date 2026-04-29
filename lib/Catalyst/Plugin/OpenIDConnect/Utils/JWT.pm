@@ -131,9 +131,15 @@ sub sign_token {
     return $token;
 }
 
-=head2 verify_token($token)
+=head2 verify_token($token, %opts)
 
 Verifies a JWT token with the configured public key.
+
+Mandatory claims C<exp> and C<iss> are always validated.  The C<nbf>
+claim is validated when present.  Pass C<expected_audience> to also
+validate the C<aud> claim:
+
+  $jwt->verify_token($token, expected_audience => 'my-client-id');
 
 Returns a hashref with decoded claims on success.
 Raises an exception on verification failure.
@@ -141,7 +147,8 @@ Raises an exception on verification failure.
 =cut
 
 sub verify_token {
-    my ( $self, $token ) = @_;
+    my ( $self, $token, %opts ) = @_;
+    my $expected_audience = $opts{expected_audience};
 
     $self->logger->debug('Verifying JWT token') if $self->logger;
 
@@ -156,7 +163,7 @@ sub verify_token {
         # Verify signature (explicitly use SHA256 for RS256)
         my $signing_input = "$header_b64.$payload_b64";
         my $signature = _urlsafe_b64_decode($signature_b64);
-        
+
         my $pub_key = $self->public_key;
         $pub_key->use_sha256_hash();
         die 'Invalid signature' unless $pub_key->verify(
@@ -172,9 +179,23 @@ sub verify_token {
 
         $self->logger->debug('JWT payload decoded successfully') if $self->logger;
 
-        # Validate claims
-        die 'Token expired' if $payload->{exp} && $payload->{exp} < time();
-        die 'Invalid issuer' if $payload->{iss} && $payload->{iss} ne $self->issuer;
+        # --- Mandatory claim validation (RFC 7519 §4.1, OIDC Core §2) ---
+        # exp and iss must be present and valid; a token that omits them
+        # must be rejected regardless of its signature.
+        die 'Missing exp claim' unless defined $payload->{exp};
+        die 'Token expired'     if $payload->{exp} < time();
+        die 'Missing iss claim' unless defined $payload->{iss};
+        die 'Invalid issuer'    unless $payload->{iss} eq $self->issuer;
+
+        # nbf (not-before) is optional but must be honoured when present
+        die 'Token not yet valid'
+            if defined $payload->{nbf} && $payload->{nbf} > time();
+
+        # aud — validated when the caller supplies an expected value
+        if ( defined $expected_audience ) {
+            die 'Missing aud claim' unless defined $payload->{aud};
+            die 'Invalid audience'  unless $payload->{aud} eq $expected_audience;
+        }
 
         $self->logger->debug('JWT claims validated') if $self->logger;
 
