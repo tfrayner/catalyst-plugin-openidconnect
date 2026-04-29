@@ -308,6 +308,8 @@ Add a `begin` action (or Catalyst middleware) that injects these headers on all 
 
 ### LOW-1 — Non-Cryptographic PRNG Used for User IDs in Example
 
+> **Fixed (2026-04-29)** — `int(rand(10000)) + 1000` replaced with `Data::UUID->new->create_str()`. A `Data::UUID` generator instance is created once at startup and reused. `Data::UUID` was already a declared dependency in `cpanfile`.
+
 **File:** `example/app.pl`  
 **Location:** `_create_mock_user`
 

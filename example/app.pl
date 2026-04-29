@@ -6,6 +6,7 @@ use warnings;
 use FindBin;
 use lib "$FindBin::Bin/../lib";
 use lib "$FindBin::Bin/lib";
+use Data::UUID;
 
 # Explicitly require the OpenIDConnect controller before app setup
 require OIDCExample::Controller::OpenIDConnect;
@@ -198,11 +199,13 @@ sub logout : Local {
     $c->response->redirect( $c->uri_for('/') );
 }
 
+my $_uuid_gen = Data::UUID->new();
+
 sub _create_mock_user {
     my ($username) = @_;
 
     return {
-        id         => int(rand(10000)) + 1000,
+        id         => $_uuid_gen->create_str(),
         username   => $username,
         name       => "User $username",
         email      => "$username\@example.com",
