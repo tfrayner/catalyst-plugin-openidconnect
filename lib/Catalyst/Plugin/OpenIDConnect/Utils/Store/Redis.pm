@@ -260,6 +260,61 @@ sub consume_authorization_code {
     return $data;
 }
 
+=head2 store_refresh_token($jti, $sub, $client_id, $ttl)
+
+Stores a refresh token JTI in Redis with C<SETEX> using C<$ttl> seconds.  Also
+maintains a secondary per-subject Set (C<{prefix}rt_sub:{sub}>) so that all
+tokens for a user can be revoked atomically at logout time.
+
+=cut
+
+sub store_refresh_token {
+    my ( $self, $jti, $sub, $client_id, $ttl ) = @_;
+    my $data = encode_json({ sub => $sub, client_id => $client_id });
+    $self->_redis->setex( $self->prefix . 'rt:' . $jti, $ttl, $data );
+    # Secondary index for bulk-revocation at logout.
+    my $set_key = $self->prefix . 'rt_sub:' . $sub;
+    $self->_redis->sadd( $set_key, $jti );
+    $self->_redis->expire( $set_key, $ttl );
+}
+
+=head2 consume_refresh_token($jti)
+
+Atomically fetches and deletes the JTI entry using C<GETDEL> (Redis E<ge> 6.2).
+Returns the decoded data hashref, or C<undef> if absent (already used, revoked,
+or expired).
+
+=cut
+
+sub consume_refresh_token {
+    my ( $self, $jti ) = @_;
+    my $raw = $self->_redis->getdel( $self->prefix . 'rt:' . $jti );
+    return unless defined $raw;
+    my $data = try { decode_json($raw) } catch { undef };
+    if ($data) {
+        $self->_redis->srem( $self->prefix . 'rt_sub:' . $data->{sub}, $jti );
+    }
+    return $data;
+}
+
+=head2 revoke_refresh_tokens_for_user($sub)
+
+Revokes all outstanding refresh tokens for the given subject by iterating the
+per-subject Redis Set and deleting each JTI key, then deleting the Set itself.
+Called at logout time.
+
+=cut
+
+sub revoke_refresh_tokens_for_user {
+    my ( $self, $sub ) = @_;
+    my $set_key = $self->prefix . 'rt_sub:' . $sub;
+    my @jtis    = $self->_redis->smembers($set_key);
+    for my $jti (@jtis) {
+        $self->_redis->del( $self->prefix . 'rt:' . $jti );
+    }
+    $self->_redis->del($set_key);
+}
+
 # Generate a cryptographically secure random string for authorization codes.
 # Uses Bytes::Random::Secure which reads from the OS CSPRNG. The lazy _redis
 # attribute means the connection is made after fork(), so random state is

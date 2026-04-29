@@ -151,4 +151,56 @@ lives_ok { $store->consume_authorization_code($code) }
     ok( !$nd->{code_challenge}, 'No code_challenge when PKCE not used' );
 }
 
+# ---------------------------------------------------------------------------
+# Refresh token JTI lifecycle (MED-1)
+# ---------------------------------------------------------------------------
+
+{
+    my $rs = Catalyst::Plugin::OpenIDConnect::Utils::Store->new();
+
+    # Store a JTI
+    $rs->store_refresh_token( 'jti-001', 'user-sub-1', 'client-a', 3600 );
+
+    # First consume returns the metadata
+    my $rt_data = $rs->consume_refresh_token('jti-001');
+    ok( $rt_data, 'consume_refresh_token returns data on first call' );
+    is( $rt_data->{sub},       'user-sub-1', 'sub preserved in refresh token store' );
+    is( $rt_data->{client_id}, 'client-a',   'client_id preserved in refresh token store' );
+
+    # Second consume returns undef (single-use enforcement)
+    is( $rs->consume_refresh_token('jti-001'), undef,
+        'Second consume_refresh_token returns undef (single-use enforcement)' );
+
+    # Unknown JTI returns undef
+    is( $rs->consume_refresh_token('no-such-jti'), undef,
+        'consume_refresh_token returns undef for unknown jti' );
+}
+
+# Expired refresh token must be rejected
+{
+    my $rs = Catalyst::Plugin::OpenIDConnect::Utils::Store->new();
+    $rs->store_refresh_token( 'jti-exp', 'user-sub-2', 'client-b', 1 );
+    # Force-expire the entry
+    $rs->_refresh_tokens->{'jti-exp'}{exp} = time() - 1;
+    is( $rs->consume_refresh_token('jti-exp'), undef,
+        'Expired refresh token JTI returns undef' );
+}
+
+# revoke_refresh_tokens_for_user removes all tokens for that subject
+{
+    my $rs = Catalyst::Plugin::OpenIDConnect::Utils::Store->new();
+    $rs->store_refresh_token( 'jti-r1', 'user-sub-3', 'client-c', 3600 );
+    $rs->store_refresh_token( 'jti-r2', 'user-sub-3', 'client-d', 3600 );
+    $rs->store_refresh_token( 'jti-r3', 'user-sub-4', 'client-c', 3600 );
+
+    $rs->revoke_refresh_tokens_for_user('user-sub-3');
+
+    is( $rs->consume_refresh_token('jti-r1'), undef,
+        'revoke_refresh_tokens_for_user removes first token for user' );
+    is( $rs->consume_refresh_token('jti-r2'), undef,
+        'revoke_refresh_tokens_for_user removes second token for user' );
+    ok( $rs->consume_refresh_token('jti-r3'),
+        'revoke_refresh_tokens_for_user does not remove tokens for other user' );
+}
+
 done_testing();

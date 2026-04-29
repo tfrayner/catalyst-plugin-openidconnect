@@ -179,6 +179,13 @@ Add `code_challenge` and `code_challenge_method` handling to the authorize endpo
 
 ### MED-1 — Non-Revocable Refresh Tokens
 
+> **Fixed (2026-04-29)** — Refresh tokens now carry a unique JTI (UUID v4)
+> registered in the backend store (in-memory or Redis) at issuance time with a
+> TTL of 30 days.  The token endpoint atomically consumes the JTI on each use
+> and issues a new JTI + refresh token (rotation), making every token
+> single-use.  On logout, all JTIs for the user are deleted via a secondary
+> per-subject index.  See `[0.07]` in `CHANGELOG.md` for full details.
+
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`  
 **Location:** `_handle_refresh_token_grant`
 

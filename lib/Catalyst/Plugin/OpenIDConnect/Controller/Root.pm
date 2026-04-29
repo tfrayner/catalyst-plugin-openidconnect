@@ -13,9 +13,13 @@ use Crypt::Misc qw(slow_eq);
 use URI;
 use DateTime;
 use Try::Tiny;
+use Data::UUID;
 
 # Set the namespace for OpenIDConnect routes
 __PACKAGE__->config(namespace => 'openidconnect');
+
+# Module-level UUID generator for refresh token JTI claims (MED-1).
+my $_uuid = Data::UUID->new();
 
 =head1 NAME
 
@@ -358,6 +362,30 @@ sub logout : Local {
 
     $c->log->debug('Logout endpoint accessed') if $config->{debug};
 
+    my $redirect_uri   = $c->request->params->{post_logout_redirect_uri};
+    my $id_token_hint  = $c->request->params->{id_token_hint};
+    my $state          = $c->request->params->{state};
+
+    # Decode the hint early — before the session is destroyed — so that we
+    # have the subject identifier available for refresh token revocation (MED-1).
+    my $hint_claims;
+    if ($id_token_hint) {
+        $hint_claims = $c->openidconnect->jwt->decode_id_token_hint($id_token_hint);
+    }
+
+    # Determine the subject identifier for refresh token revocation.  Prefer
+    # the hint (authoritative); fall back to the live session so that
+    # logout-without-hint still revokes tokens when the session is present.
+    my $logout_sub = do {
+        if ( $hint_claims && $hint_claims->{sub} ) {
+            $hint_claims->{sub};
+        }
+        else {
+            my $sess_user = eval { $c->session->{user} };
+            $sess_user ? ( $sess_user->{sub} || $sess_user->{id} ) : undef;
+        }
+    };
+
     # Clear user session
     if ( $c->user ) {
         $c->log->info('Logging out user: ' . $c->user->id);
@@ -370,9 +398,12 @@ sub logout : Local {
         $c->delete_session('User session destroyed');
     }
 
-    my $redirect_uri   = $c->request->params->{post_logout_redirect_uri};
-    my $id_token_hint  = $c->request->params->{id_token_hint};
-    my $state          = $c->request->params->{state};
+    # Revoke all outstanding refresh tokens for this user (MED-1).
+    if ($logout_sub) {
+        $c->openidconnect->store->revoke_refresh_tokens_for_user($logout_sub);
+        $c->log->debug("Refresh tokens revoked for user: $logout_sub")
+            if $config->{debug};
+    }
 
     if ($redirect_uri) {
         # id_token_hint is required when a redirect is requested so that we
@@ -384,8 +415,7 @@ sub logout : Local {
                 'id_token_hint is required when post_logout_redirect_uri is provided' );
         }
 
-        # Decode the hint token (signature verified, expiry ignored).
-        my $hint_claims = $c->openidconnect->jwt->decode_id_token_hint($id_token_hint);
+        # $hint_claims was decoded above; reject if invalid.
         unless ($hint_claims) {
             $c->log->warn('Invalid id_token_hint provided at logout');
             return $self->_json_error( $c, 'invalid_request', 'Invalid id_token_hint' );
@@ -615,14 +645,22 @@ sub _handle_authorization_code_grant {
     my $access_token = $c->openidconnect->jwt->create_access_token(%access_token_payload);
     $c->log->debug('Access token created') if $config->{debug};
 
+    # Issue a refresh token with a unique JTI and register the JTI in the
+    # store so the token endpoint can enforce single-use semantics (MED-1).
+    my $rt_jti = $_uuid->create_str();
+    my $rt_ttl = 30 * 24 * 3600;  # 30 days
     my %refresh_token_payload = (
         sub => $user_claims->{sub},
         aud => $client_id,
-        exp => $now + ( 30 * 24 * 3600 ),  # 30 days
+        jti => $rt_jti,
+        exp => $now + $rt_ttl,
     );
 
     my $refresh_token = $c->openidconnect->jwt->create_refresh_token(%refresh_token_payload);
-    $c->log->debug('Refresh token created') if $config->{debug};
+    $c->openidconnect->store->store_refresh_token(
+        $rt_jti, $user_claims->{sub}, $client_id, $rt_ttl,
+    );
+    $c->log->debug('Refresh token created and JTI registered') if $config->{debug};
 
     $c->log->info("Tokens issued for client: $client_id, user: " . $user_claims->{sub});
 
@@ -672,6 +710,23 @@ sub _handle_refresh_token_grant {
         return $self->_json_error( $c, 'invalid_grant', 'Invalid refresh token' );
     };
 
+    # Enforce single-use via JTI (MED-1).  All tokens issued after this fix
+    # carry a jti registered in the store.  Tokens without a jti (issued before
+    # the fix) are rejected to prevent indefinite re-use of old long-lived tokens.
+    my $jti = $payload->{jti};
+    unless ( defined $jti ) {
+        $c->log->warn("Refresh token missing jti claim for client: $client_id");
+        return $self->_json_error( $c, 'invalid_grant',
+            'Refresh token is not valid (missing jti)' );
+    }
+
+    unless ( $c->openidconnect->store->consume_refresh_token($jti) ) {
+        $c->log->warn("Refresh token jti already used or revoked: $jti");
+        return $self->_json_error( $c, 'invalid_grant',
+            'Refresh token has already been used or revoked' );
+    }
+    $c->log->debug("Refresh token jti consumed: $jti") if $config->{debug};
+
     # Create new access token
     my $now = time();
     my %new_payload = (
@@ -683,12 +738,28 @@ sub _handle_refresh_token_grant {
     my $access_token = $c->openidconnect->jwt->create_access_token(%new_payload);
     $c->log->debug('New access token created from refresh token') if $config->{debug};
 
+    # Rotate refresh token: issue a new one with a fresh JTI (MED-1).
+    my $new_rt_jti = $_uuid->create_str();
+    my $rt_ttl     = 30 * 24 * 3600;
+    my %new_rt_payload = (
+        sub => $payload->{sub},
+        aud => $client_id,
+        jti => $new_rt_jti,
+        exp => $now + $rt_ttl,
+    );
+    my $new_refresh_token = $c->openidconnect->jwt->create_refresh_token(%new_rt_payload);
+    $c->openidconnect->store->store_refresh_token(
+        $new_rt_jti, $payload->{sub}, $client_id, $rt_ttl,
+    );
+    $c->log->debug('Refresh token rotated') if $config->{debug};
+
     $c->log->info("Access token refreshed for client: $client_id, user: " . $payload->{sub});
 
     $self->_json_response( $c, {
-        access_token => $access_token,
-        token_type   => 'Bearer',
-        expires_in   => 3600,
+        access_token  => $access_token,
+        token_type    => 'Bearer',
+        expires_in    => 3600,
+        refresh_token => $new_refresh_token,
     });
 }
 

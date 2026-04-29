@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.07] - 2026-04-29 (Security Fix: MED-1)
+
+### Security
+
+- **MED-1 fixed — Non-revocable refresh tokens** (`Controller::Root`,
+  `Utils::Store`, `Utils::Store::Redis`, `Role::Store`).  Refresh tokens are
+  now bound to a unique JTI (UUID v4) that is stored server-side with a TTL
+  matching the 30-day token lifetime.  On every use the JTI is atomically
+  consumed from the store (Perl `delete` for the in-memory backend;
+  Redis `GETDEL` for the Redis backend) and a new JTI + refresh token are
+  issued immediately (refresh token rotation).  A second attempt to use the
+  same refresh token receives `invalid_grant`.  On logout, all outstanding JTIs
+  for the user are deleted via a secondary per-subject index, invalidating any
+  stolen tokens immediately.  The `Role::Store` interface gains three new
+  required methods: `store_refresh_token`, `consume_refresh_token`, and
+  `revoke_refresh_tokens_for_user`.
+
 ## [0.06] - 2026-04-29 (Security Fixes: MED-2, MED-3, MED-4, MED-5)
 
 ### Security

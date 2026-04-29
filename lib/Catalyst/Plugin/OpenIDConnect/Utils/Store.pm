@@ -64,6 +64,21 @@ has logger => (
     required => 0,
 );
 
+# Private storage for refresh token JTIs (MED-1).
+
+has _refresh_tokens => (
+    is      => 'ro',
+    isa     => 'HashRef',
+    default => sub { {} },
+);
+
+# Secondary index: sub => { jti => 1 }  Used for bulk revocation at logout.
+has _rt_by_sub => (
+    is      => 'ro',
+    isa     => 'HashRef',
+    default => sub { {} },
+);
+
 =head1 METHODS
 
 =head2 create_authorization_code($client_id, $user, $scope, $redirect_uri, $nonce, $pkce)
@@ -160,6 +175,58 @@ sub consume_authorization_code {
 
     $self->logger->debug("Authorization code consumed: $code") if $self->logger;
     return $code_data;
+}
+
+=head2 store_refresh_token($jti, $sub, $client_id, $ttl)
+
+Stores a refresh token JTI with the associated subject, client, and a TTL in
+seconds.  Called at token-issuance time so that the token endpoint can later
+enforce single-use semantics via L</consume_refresh_token>.
+
+=cut
+
+sub store_refresh_token {
+    my ( $self, $jti, $sub, $client_id, $ttl ) = @_;
+    $self->_refresh_tokens->{$jti} = {
+        sub       => $sub,
+        client_id => $client_id,
+        exp       => time() + $ttl,
+    };
+    # Secondary index by subject so all tokens can be revoked at logout.
+    $self->_rt_by_sub->{$sub}{$jti} = 1;
+}
+
+=head2 consume_refresh_token($jti)
+
+Atomically removes the JTI from the store and returns the associated data
+hashref, or C<undef> if absent or expired (already used / revoked / TTL
+elapsed).
+
+=cut
+
+sub consume_refresh_token {
+    my ( $self, $jti ) = @_;
+    my $data = delete $self->_refresh_tokens->{$jti};
+    return unless $data;
+    if ( $data->{exp} < time() ) {
+        delete $self->_rt_by_sub->{ $data->{sub} }{$jti};
+        return;
+    }
+    delete $self->_rt_by_sub->{ $data->{sub} }{$jti};
+    return $data;
+}
+
+=head2 revoke_refresh_tokens_for_user($sub)
+
+Removes all refresh token JTIs for the given subject identifier from the store.
+Called at logout time to prevent re-use of stolen tokens.
+
+=cut
+
+sub revoke_refresh_tokens_for_user {
+    my ( $self, $sub ) = @_;
+    my $jtis = delete $self->_rt_by_sub->{$sub} // {};
+    delete $self->_refresh_tokens->{$_} for keys %{$jtis};
 }
 
 # Generate a cryptographically secure random string for codes and tokens.

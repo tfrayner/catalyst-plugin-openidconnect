@@ -61,6 +61,34 @@ use Catalyst::Plugin::OpenIDConnect::Role::Store;
         my ( $self, $key ) = @_;
         push @{ $self->{calls} }, [ del => $key ];
         delete $self->{store}{$key};
+        delete $self->{sets}{$key};
+    }
+
+    sub sadd {
+        my ( $self, $key, @members ) = @_;
+        push @{ $self->{calls} }, [ sadd => $key, @members ];
+        $self->{sets}{$key} //= {};
+        $self->{sets}{$key}{$_} = 1 for @members;
+    }
+
+    sub srem {
+        my ( $self, $key, @members ) = @_;
+        push @{ $self->{calls} }, [ srem => $key, @members ];
+        if ( $self->{sets}{$key} ) {
+            delete $self->{sets}{$key}{$_} for @members;
+        }
+    }
+
+    sub smembers {
+        my ( $self, $key ) = @_;
+        push @{ $self->{calls} }, [ smembers => $key ];
+        return keys %{ $self->{sets}{$key} // {} };
+    }
+
+    sub expire {
+        my ( $self, $key, $ttl ) = @_;
+        push @{ $self->{calls} }, [ expire => $key, $ttl ];
+        # TTL management not simulated in the mock.
     }
 
     sub recorded_calls { $_[0]->{calls} }
@@ -313,6 +341,63 @@ lives_ok { $store->consume_authorization_code($code) }
     );
     my $nd = $ns->consume_authorization_code($nc);
     ok( !$nd->{code_challenge}, 'No code_challenge in Redis when PKCE not used' );
+}
+
+# ---------------------------------------------------------------------------
+# Refresh token JTI lifecycle (MED-1)
+# ---------------------------------------------------------------------------
+
+{
+    my $rs = MockRedisStore->new( prefix => 'rt_test:' );
+
+    # Store a JTI
+    $rs->store_refresh_token( 'jti-001', 'user-sub-1', 'client-a', 3600 );
+
+    my $calls = $rs->_redis->recorded_calls;
+    my @setex_calls = grep { $_->[0] eq 'setex' } @$calls;
+    my $rt_call = $setex_calls[-1];  # most recent setex is for the refresh token
+    like( $rt_call->[1], qr/^rt_test:rt:jti-001$/, 'store_refresh_token uses rt: key prefix' );
+    is( $rt_call->[2], 3600, 'store_refresh_token uses supplied TTL' );
+
+    my @sadd_calls = grep { $_->[0] eq 'sadd' } @$calls;
+    ok( scalar @sadd_calls, 'sadd called for secondary index' );
+    like( $sadd_calls[-1][1], qr/rt_sub:user-sub-1/, 'sadd uses rt_sub: index key' );
+
+    # First consume returns the metadata
+    my $rt_data = $rs->consume_refresh_token('jti-001');
+    ok( $rt_data, 'consume_refresh_token returns data on first call (Redis)' );
+    is( $rt_data->{sub},       'user-sub-1', 'sub preserved through Redis JSON' );
+    is( $rt_data->{client_id}, 'client-a',   'client_id preserved through Redis JSON' );
+
+    # Second consume returns undef (getdel already removed the key)
+    is( $rs->consume_refresh_token('jti-001'), undef,
+        'Second consume_refresh_token returns undef (single-use, Redis)' );
+
+    # Unknown JTI returns undef
+    is( $rs->consume_refresh_token('no-such-jti'), undef,
+        'consume_refresh_token returns undef for unknown jti (Redis)' );
+}
+
+# revoke_refresh_tokens_for_user removes all tokens for that subject
+{
+    my $rs = MockRedisStore->new( prefix => 'rev:' );
+    $rs->store_refresh_token( 'jti-r1', 'user-sub-3', 'client-c', 3600 );
+    $rs->store_refresh_token( 'jti-r2', 'user-sub-3', 'client-d', 3600 );
+    $rs->store_refresh_token( 'jti-r3', 'user-sub-4', 'client-c', 3600 );
+
+    $rs->revoke_refresh_tokens_for_user('user-sub-3');
+
+    # The JTI keys for user-sub-3 must have been deleted
+    is( $rs->_redis->{store}{'rev:rt:jti-r1'}, undef,
+        'revoke_refresh_tokens_for_user deletes first jti key (Redis)' );
+    is( $rs->_redis->{store}{'rev:rt:jti-r2'}, undef,
+        'revoke_refresh_tokens_for_user deletes second jti key (Redis)' );
+    # The set index for user-sub-3 must have been deleted
+    is( $rs->_redis->{sets}{'rev:rt_sub:user-sub-3'}, undef,
+        'revoke_refresh_tokens_for_user deletes the sub index set (Redis)' );
+    # user-sub-4 token must remain
+    ok( defined $rs->_redis->{store}{'rev:rt:jti-r3'},
+        'revoke_refresh_tokens_for_user does not remove tokens for other user (Redis)' );
 }
 
 done_testing();

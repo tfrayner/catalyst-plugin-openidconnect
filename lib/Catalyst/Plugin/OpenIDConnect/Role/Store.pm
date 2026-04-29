@@ -65,6 +65,40 @@ C<consume_authorization_code>.  Use C<consume_authorization_code> alone.
 
 requires 'consume_authorization_code';
 
+=head2 store_refresh_token($jti, $sub, $client_id, $ttl)
+
+Stores a refresh token identifier (JTI) with associated metadata and a TTL
+(in seconds).  Called at token-issuance time so that the token endpoint can
+later verify the token has not been used or revoked.
+
+=cut
+
+requires 'store_refresh_token';
+
+=head2 consume_refresh_token($jti)
+
+Atomically checks that the JTI exists in the store and removes it.  Returns a
+hashref containing at minimum C<sub> and C<client_id> on success, or C<undef>
+if the JTI is absent (token has already been used, was explicitly revoked, or
+has expired).
+
+Callers B<must> treat a C<undef> return as C<invalid_grant> and reject the
+request — this is the single-use enforcement mechanism.
+
+=cut
+
+requires 'consume_refresh_token';
+
+=head2 revoke_refresh_tokens_for_user($sub)
+
+Revokes all outstanding refresh tokens for the given subject identifier across
+all clients.  Called at logout time to ensure that an attacker who has stolen a
+refresh token cannot continue using it after the legitimate user has logged out.
+
+=cut
+
+requires 'revoke_refresh_tokens_for_user';
+
 1;
 
 =head1 AUTHOR
