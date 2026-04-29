@@ -8,6 +8,7 @@ BEGIN { extends 'Catalyst::Controller'; }
 use JSON::MaybeXS qw(encode_json decode_json);
 use MIME::Base64 qw(encode_base64 decode_base64);
 use Crypt::PK::RSA;
+use Crypt::Misc qw(slow_eq);
 use URI;
 use DateTime;
 use Try::Tiny;
@@ -501,7 +502,7 @@ sub _handle_authorization_code_grant {
     if ($client_secret) {
         $c->log->debug("Verifying client credentials for: $client_id") if $config->{debug};
         my $client = $c->openidconnect->get_client($client_id);
-        unless ( $client && $client->{client_secret} eq $client_secret ) {
+        unless ( $client && slow_eq( $client->{client_secret}, $client_secret ) ) {
             $c->log->warn("Client authentication failed for: $client_id");
             return $self->_json_error( $c, 'invalid_client', 'Client authentication failed' );
         }
@@ -586,7 +587,7 @@ sub _handle_refresh_token_grant {
 
     # Verify client
     my $client = $c->openidconnect->get_client($client_id);
-    unless ( $client && $client->{client_secret} eq $client_secret ) {
+    unless ( $client && slow_eq( $client->{client_secret}, $client_secret ) ) {
         $c->log->warn("Client authentication failed for: $client_id");
         return $self->_json_error( $c, 'invalid_client', 'Client authentication failed' );
     }

@@ -104,6 +104,8 @@ die 'Token not yet valid' if defined $payload->{nbf} && $payload->{nbf} > time()
 
 ### HIGH-3 — Timing Attack on Client Secret Comparison
 
+> **Fixed (2026-04-29)** — Both `client_secret eq` comparisons in `Controller::Root` replaced with `Crypt::Misc::slow_eq()`. `Crypt::Misc` added to `cpanfile`.
+
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`  
 **Location:** `_handle_authorization_code_grant`, `_handle_refresh_token_grant`
 

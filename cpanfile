@@ -18,6 +18,7 @@ requires 'URI';
 requires 'Try::Tiny';
 requires 'Data::UUID';
 requires 'Bytes::Random::Secure';
+requires 'Crypt::Misc'; # for slow_eq() constant-time client secret comparison (HIGH-3)
 requires 'Module::Runtime';
 
 # Optional: install Redis::Fast (preferred) or Redis for the Redis store backend.
