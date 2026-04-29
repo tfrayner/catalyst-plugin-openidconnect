@@ -221,8 +221,13 @@ sub get_authorization_code {
 
 =head2 consume_authorization_code($code)
 
-Atomically deletes the authorization code from Redis, enforcing single-use
-semantics.
+Atomically fetches and deletes the authorization code from Redis using the
+C<GETDEL> command (Redis E<ge> 6.2).  Because C<GETDEL> is a single server-side
+operation it is race-free: a second concurrent request carrying the same code
+will receive C<nil> from Redis and be rejected.
+
+Returns the decoded code data hashref on success, or C<undef> if the code
+does not exist, has already been consumed, or cannot be decoded.
 
 =cut
 
@@ -230,7 +235,23 @@ sub consume_authorization_code {
     my ( $self, $code ) = @_;
 
     $self->logger->debug("Consuming authorization code: $code") if $self->logger;
-    $self->_redis->del( $self->prefix . $code );
+
+    # GETDEL (Redis >= 6.2) fetches and deletes atomically in a single
+    # round-trip, eliminating the GET + DEL race condition (HIGH-4).
+    my $raw = $self->_redis->getdel( $self->prefix . $code );
+    return unless defined $raw;
+
+    my $data = try {
+        decode_json($raw);
+    }
+    catch {
+        $self->logger->warn("Failed to decode consumed authorization code data: $_")
+            if $self->logger;
+        undef;
+    };
+
+    $self->logger->debug("Authorization code consumed: $code") if $self->logger && $data;
+    return $data;
 }
 
 # Generate a cryptographically secure random string for authorization codes.

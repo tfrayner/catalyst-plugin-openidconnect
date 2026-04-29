@@ -49,6 +49,14 @@ use Catalyst::Plugin::OpenIDConnect::Role::Store;
         return $entry->{value};
     }
 
+    # GETDEL (Redis >= 6.2): atomically fetch and remove
+    sub getdel {
+        my ( $self, $key ) = @_;
+        push @{ $self->{calls} }, [ getdel => $key ];
+        my $entry = delete $self->{store}{$key};
+        return defined $entry ? $entry->{value} : undef;
+    }
+
     sub del {
         my ( $self, $key ) = @_;
         push @{ $self->{calls} }, [ del => $key ];
@@ -149,18 +157,28 @@ is( $store->get_authorization_code('nonexistent'), undef,
     'get_authorization_code returns undef for unknown code' );
 
 # ---------------------------------------------------------------------------
-# consume_authorization_code
+# consume_authorization_code — atomic GETDEL, returns data (HIGH-4)
 # ---------------------------------------------------------------------------
 
-$store->consume_authorization_code($code);
+my $consumed_data = $store->consume_authorization_code($code);
+ok( $consumed_data, 'consume_authorization_code returns the code data' );
+is( $consumed_data->{client_id},    'test-client',                    'returned client_id matches' );
+is( $consumed_data->{scope},        'openid profile email',           'returned scope matches' );
+is( $consumed_data->{redirect_uri}, 'http://localhost:3000/callback', 'returned redirect_uri matches' );
+is( $consumed_data->{nonce},        'nonce-abc',                      'returned nonce matches' );
 
+# Code must no longer be retrievable
 is( $store->get_authorization_code($code), undef,
     'Code is unavailable after consume' );
 
-# Confirm del was called
-my $del_calls = [ grep { $_->[0] eq 'del' } @{ $store->_redis->recorded_calls } ];
-is( scalar @$del_calls, 1, 'del was called once' );
-like( $del_calls->[0][1], qr/^test:oidc:code:/, 'del used correct key prefix' );
+# Confirm getdel (not del) was called
+my $getdel_calls = [ grep { $_->[0] eq 'getdel' } @{ $store->_redis->recorded_calls } ];
+is( scalar @$getdel_calls, 1, 'getdel was called once' );
+like( $getdel_calls->[0][1], qr/^test:oidc:code:/, 'getdel used correct key prefix' );
+
+# Second consume must return undef (single-use)
+is( $store->consume_authorization_code($code), undef,
+    'Second consume returns undef' );
 
 # Double-consume must not die
 lives_ok { $store->consume_authorization_code($code) }

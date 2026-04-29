@@ -126,14 +126,34 @@ sub get_authorization_code {
 
 =head2 consume_authorization_code($code)
 
-Consumes (removes) an authorization code after it's been exchanged for tokens.
+Atomically deletes the authorization code and returns its data.  Uses Perl's
+C<delete> which fetches and removes the hash entry in a single operation,
+making it race-free within a single process.
+
+Returns the code data hashref on success, or C<undef> if the code does not
+exist or has expired.
 
 =cut
 
 sub consume_authorization_code {
     my ( $self, $code ) = @_;
+
     $self->logger->debug("Consuming authorization code: $code") if $self->logger;
-    delete $self->codes->{$code};
+
+    # delete() is atomic within a single process: it removes and returns the
+    # value in one step, preventing two concurrent requests from both
+    # succeeding a check-then-delete sequence.
+    my $code_data = delete $self->codes->{$code};
+    return unless $code_data;
+
+    if ( $code_data->{expires_at} < time() ) {
+        $self->logger->warn("Authorization code expired at consume time: $code")
+            if $self->logger;
+        return;
+    }
+
+    $self->logger->debug("Authorization code consumed: $code") if $self->logger;
+    return $code_data;
 }
 
 # Generate a cryptographically secure random string for codes and tokens.

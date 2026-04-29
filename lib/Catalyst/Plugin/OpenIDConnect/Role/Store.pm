@@ -45,8 +45,16 @@ requires 'get_authorization_code';
 
 =head2 consume_authorization_code($code)
 
-Permanently removes an authorization code after it has been exchanged for tokens.
-This enforces single-use semantics for authorization codes.
+Atomically removes an authorization code and returns its data.  This is the
+primary method the token endpoint must use to redeem a code; it enforces
+single-use semantics without a TOCTOU race condition.
+
+Returns the code data hashref (same structure as C<get_authorization_code>)
+on success, or C<undef> if the code does not exist, has already been consumed,
+or has expired.
+
+B<Important:> Callers must not call C<get_authorization_code> followed by
+C<consume_authorization_code>.  Use C<consume_authorization_code> alone.
 
 =cut
 

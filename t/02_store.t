@@ -62,11 +62,23 @@ is( $store->get_authorization_code('nonexistent-code'), undef,
 
 # ---------------------------------------------------------------------------
 # Consumption (single-use enforcement)
+# HIGH-4: consume_authorization_code must atomically return the data so the
+# controller never needs a separate get_authorization_code call.
 # ---------------------------------------------------------------------------
 
-$store->consume_authorization_code($code);
+my $returned_data = $store->consume_authorization_code($code);
+ok( $returned_data, 'consume_authorization_code returns the code data' );
+is( $returned_data->{client_id},    'test-client',                    'returned client_id matches' );
+is( $returned_data->{scope},        'openid profile email',           'returned scope matches' );
+is( $returned_data->{redirect_uri}, 'http://localhost:3000/callback', 'returned redirect_uri matches' );
+is( $returned_data->{nonce},        'random-nonce-123',               'returned nonce matches' );
+
 is( $store->get_authorization_code($code), undef,
-    'Code is consumed and no longer available' );
+    'Code is consumed and no longer retrievable' );
+
+# Second consume must return undef (single-use enforcement)
+is( $store->consume_authorization_code($code), undef,
+    'Second consume returns undef' );
 
 # Double-consume must not die
 lives_ok { $store->consume_authorization_code($code) }

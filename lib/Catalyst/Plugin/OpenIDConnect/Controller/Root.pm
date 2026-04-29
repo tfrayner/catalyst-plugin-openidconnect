@@ -482,12 +482,18 @@ sub _handle_authorization_code_grant {
 
     $c->log->debug("Token request - code: $code, client_id: $client_id") if $config->{debug};
 
-    # Get authorization code to validate and extract client_id if not provided
-    my $code_data = $c->openidconnect->store->get_authorization_code($code);
+    # Atomically consume (fetch + delete) the authorization code.
+    # Using consume_authorization_code rather than a separate get + delete
+    # eliminates the TOCTOU race that would otherwise allow two concurrent
+    # requests carrying the same code to both succeed (HIGH-4).
+    # Per RFC 6749 §4.1.2 any code that fails subsequent validation must
+    # also be treated as used, which this pattern naturally enforces.
+    my $code_data = $c->openidconnect->store->consume_authorization_code($code);
     unless ($code_data) {
-        $c->log->warn("Authorization code not found or expired: $code");
+        $c->log->warn("Authorization code not found, expired, or already used: $code");
         return $self->_json_error( $c, 'invalid_grant', 'Authorization code not found or expired' );
     }
+    $c->log->debug("Authorization code consumed: $code") if $config->{debug};
 
     # Use client_id from authorization code if not provided in request (public client flow)
     $client_id ||= $code_data->{client_id};
@@ -514,10 +520,6 @@ sub _handle_authorization_code_grant {
             return $self->_json_error( $c, 'invalid_client', 'Unknown client' );
         }
     }
-
-    # Consume the code (one-time use)
-    $c->openidconnect->store->consume_authorization_code($code);
-    $c->log->debug("Authorization code consumed: $code") if $config->{debug};
 
     # User claims were extracted and stored at authorization time, so
     # $code_data->{user} is already the mapped claims hashref.

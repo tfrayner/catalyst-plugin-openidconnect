@@ -131,6 +131,8 @@ Alternatively, store secrets as bcrypt hashes and compare with `Crypt::Bcrypt`.
 
 ### HIGH-4 — Authorization Code Redemption is Not Atomic (TOCTOU Race Condition)
 
+> **Fixed (2026-04-29)** — `consume_authorization_code` is now the single atomic operation used by the token endpoint. In-memory backend uses Perl's `delete` (atomic per-process). Redis backend uses `GETDEL` (Redis ≥ 6.2 single-command atomic fetch-and-delete). The controller no longer calls `get_authorization_code` + `consume_authorization_code` separately. `Role::Store` contract updated to document the return value.
+
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm` and  
 `lib/Catalyst/Plugin/OpenIDConnect/Utils/Store/Redis.pm`
 
