@@ -119,6 +119,17 @@ sub sign_token {
 
     # Encode header and payload
     my $header_json   = encode_json( \%header );
+
+    # Perl's JSON serialiser encodes a scalar as a JSON string if the SvPOK
+    # (string) flag is set, even when the value is also numeric.  Reading a
+    # number through a string context — e.g. the sprintf() debug statement
+    # above — sets that flag.  Explicitly numify all timestamp claims with
+    # int() to clear SvPOK before serialisation so they are always encoded
+    # as JSON integers (e.g. 1746000000, not "1746000000").  Python's authlib and
+    # other compliant RPs reject string-typed exp/iat/nbf values.
+    $payload{$_} = int( $payload{$_} )
+        for grep { defined $payload{$_} } qw(exp iat nbf);
+
     my $payload_json  = encode_json( \%payload );
 
     my $header_b64   = _urlsafe_b64_encode($header_json);

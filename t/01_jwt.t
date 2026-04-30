@@ -244,4 +244,40 @@ lives_ok {
     like( $all_log, qr/my-client/, 'MED-2: aud written to debug log' );
 }
 
+# ---------------------------------------------------------------------------
+# exp/iat/nbf must be encoded as JSON integers, not strings.
+# Authlib (Python) and other strict RPs reject string-typed timestamp claims.
+# Root cause: Perl's sprintf(%s) sets the SvPOK flag, causing JSON::XS to
+# encode the scalar as a JSON string.  The sign_token fix must numify with
+# int() before serialisation.
+# ---------------------------------------------------------------------------
+
+{
+    my $exp_val = time() + 3600;
+
+    # Touch the value through a string context to simulate what the debug
+    # sprintf does inside sign_token.
+    my $dummy = sprintf( '%s', $exp_val );
+
+    my $token = $jwt->sign_token(
+        sub => 'type-test',
+        aud => 'client-x',
+        exp => $exp_val,
+    );
+
+    my @parts = split /\./, $token;
+    use MIME::Base64 qw(decode_base64);
+    ( my $padded = $parts[1] ) =~ tr/-_/+\//;
+    $padded .= '=' x ( (4 - length($padded) % 4) % 4 );
+    my $raw_payload = decode_base64($padded);
+
+    # The JSON must NOT contain a quoted exp value (e.g. "exp":"1234...")
+    unlike( $raw_payload, qr/"exp"\s*:\s*"/,
+        'sign_token encodes exp as a JSON integer, not a string' );
+    like( $raw_payload, qr/"exp"\s*:\s*\d+/,
+        'sign_token exp value is numeric in raw JSON' );
+    like( $raw_payload, qr/"iat"\s*:\s*\d+/,
+        'sign_token iat value is numeric in raw JSON' );
+}
+
 done_testing();
