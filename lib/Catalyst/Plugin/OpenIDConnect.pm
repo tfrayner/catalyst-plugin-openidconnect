@@ -149,7 +149,11 @@ sub _oidc_store {
 
 =head2 setup
 
-Catalyst setup hook - initialize the plugin.
+Catalyst setup hook - initialize the plugin. Note that this hook can effectively be blocked
+in the consuming app by a similar setup method checking for configuration and deleting 
+$config->{issuer} if not properly configured. This allows the consuming app to control whether 
+the plugin initializes or not, which is useful for example in FastCGI deployments where multiple 
+apps share the same codebase but only some are OIDC providers.
 
 =cut
 
