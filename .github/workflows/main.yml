@@ -11,7 +11,7 @@ jobs:
       matrix:
         perl-version:
           - '5.38'
-          - '5.10'
+          - '5.20' # Earliest supported by current Catalyst::Runtime
 
     container:
       image: perldocker/perl-tester:${{ matrix.perl-version }}
