@@ -6,14 +6,20 @@ use namespace::autoclean;
 BEGIN { extends 'Catalyst::Controller'; }
 
 use JSON::MaybeXS qw(encode_json decode_json);
-use MIME::Base64 qw(encode_base64 decode_base64);
+use MIME::Base64 qw(encode_base64 decode_base64 encode_base64url);
+use Digest::SHA qw(sha256);
 use Crypt::PK::RSA;
+use Crypt::Misc qw(slow_eq);
 use URI;
 use DateTime;
 use Try::Tiny;
+use Data::UUID;
 
 # Set the namespace for OpenIDConnect routes
 __PACKAGE__->config(namespace => 'openidconnect');
+
+# Module-level UUID generator for refresh token JTI claims (MED-1).
+my $_uuid = Data::UUID->new();
 
 =head1 NAME
 
@@ -29,6 +35,31 @@ Handles OpenID Connect protocol endpoints:
   - /.well-known/openid-configuration - Discovery endpoint
 
 =cut
+
+=head2 begin
+
+Called automatically before every action in this controller.  Sets HTTP
+security headers that must be present on all OIDC endpoint responses (MED-6).
+
+=cut
+
+sub begin : Private {
+    my ( $self, $c ) = @_;
+
+    # RFC 6749 §5.1 requires Cache-Control: no-store on token responses;
+    # applied globally so new endpoints can't accidentally omit it.
+    # Pragma: no-cache is the HTTP/1.0 equivalent.
+    $c->response->header( 'Cache-Control'          => 'no-store' );
+    $c->response->header( 'Pragma'                 => 'no-cache' );
+
+    # Prevent MIME sniffing.
+    $c->response->header( 'X-Content-Type-Options' => 'nosniff' );
+
+    # Clickjacking protection on the authorize endpoint HTML page.
+    # Both headers are set for broadest browser compatibility (MED-6).
+    $c->response->header( 'X-Frame-Options'        => 'DENY' );
+    $c->response->header( 'Content-Security-Policy' => "frame-ancestors 'none'" );
+}
 
 =head2 discovery
 
@@ -70,22 +101,26 @@ sub authorize : Local {
 
     $c->log->debug('Authorization endpoint accessed') if $config->{debug};
 
-    my $response_type = $c->request->params->{response_type};
-    my $client_id     = $c->request->params->{client_id};
-    my $redirect_uri  = $c->request->params->{redirect_uri};
-    my $scope         = $c->request->params->{scope};
-    my $state         = $c->request->params->{state};
-    my $nonce         = $c->request->params->{nonce};
+    my $response_type        = $c->request->params->{response_type};
+    my $client_id            = $c->request->params->{client_id};
+    my $redirect_uri         = $c->request->params->{redirect_uri};
+    my $scope                = $c->request->params->{scope};
+    my $state                = $c->request->params->{state};
+    my $nonce                = $c->request->params->{nonce};
+    my $code_challenge       = $c->request->params->{code_challenge};
+    my $code_challenge_method = $c->request->params->{code_challenge_method};
 
     $c->log->debug("Authorization request - client_id: $client_id, response_type: $response_type, redirect_uri: $redirect_uri") if $config->{debug};
 
     my $stored_auth_request = $c->session->{oidc_auth_request} || {};
-    $response_type //= $stored_auth_request->{response_type};
-    $client_id     //= $stored_auth_request->{client_id};
-    $redirect_uri  //= $stored_auth_request->{redirect_uri};
-    $scope         ||= $stored_auth_request->{scope} || 'openid';
-    $state         //= $stored_auth_request->{state};
-    $nonce         //= $stored_auth_request->{nonce};
+    $response_type         //= $stored_auth_request->{response_type};
+    $client_id             //= $stored_auth_request->{client_id};
+    $redirect_uri          //= $stored_auth_request->{redirect_uri};
+    $scope                 ||= $stored_auth_request->{scope} || 'openid';
+    $state                 //= $stored_auth_request->{state};
+    $nonce                 //= $stored_auth_request->{nonce};
+    $code_challenge        //= $stored_auth_request->{code_challenge};
+    $code_challenge_method //= $stored_auth_request->{code_challenge_method};
 
     # Validate request parameters
     unless ( $response_type && $response_type eq 'code' ) {
@@ -123,7 +158,7 @@ sub authorize : Local {
     }
 
     # Validate redirect URI
-    my @allowed_uris = split /\s+/, $client->{redirect_uris};
+    my @allowed_uris = _normalize_uri_list( $client->{redirect_uris} );
     unless ( grep { $_ eq $redirect_uri } @allowed_uris ) {
         $c->log->error("Redirect URI mismatch for client $client_id: $redirect_uri");
         return $self->_error_response(
@@ -136,18 +171,43 @@ sub authorize : Local {
     unless ( $c->user ) {
         $c->log->debug('User not authenticated, redirecting to login') if $config->{debug};
         $c->session->{oidc_auth_request} = {
-            response_type => $response_type,
-            client_id     => $client_id,
-            redirect_uri  => $redirect_uri,
-            scope         => $scope,
-            state         => $state,
-            nonce         => $nonce,
+            response_type         => $response_type,
+            client_id             => $client_id,
+            redirect_uri          => $redirect_uri,
+            scope                 => $scope,
+            state                 => $state,
+            nonce                 => $nonce,
+            code_challenge        => $code_challenge,
+            code_challenge_method => $code_challenge_method,
         };
 
         return $c->response->redirect( $c->uri_for('/login', { back => '/openidconnect/authorize' }) );
     }
 
     $c->log->info("Authorization granted for user: " . $c->user->id . " to client: $client_id");
+
+    # PKCE validation (RFC 7636, OAuth 2.1).
+    # Public clients (no client_secret) MUST supply a code_challenge.
+    # Confidential clients MAY supply one; if they do, it is validated.
+    # Only S256 is accepted — 'plain' provides no meaningful security.
+    my $is_public_client = !( $client->{client_secret} && length $client->{client_secret} );
+    if ( $is_public_client && !$code_challenge ) {
+        $c->log->warn("PKCE code_challenge required for public client: $client_id");
+        return $self->_error_response(
+            $c, $redirect_uri, 'invalid_request',
+            'code_challenge is required for public clients', $state
+        );
+    }
+    if ( $code_challenge ) {
+        my $method = $code_challenge_method // 'plain';
+        unless ( $method eq 'S256' ) {
+            $c->log->warn("Unsupported code_challenge_method '$method' for client: $client_id");
+            return $self->_error_response(
+                $c, $redirect_uri, 'invalid_request',
+                'code_challenge_method must be S256', $state
+            );
+        }
+    }
 
     # Extract user claims now, while the live user object is available.
     # Storing the plain claims hashref (rather than the user object itself)
@@ -156,18 +216,24 @@ sub authorize : Local {
     # returns plain data.
     my $user_claims = $c->openidconnect->get_user_claims( $c->user );
 
-    # Create authorization code
+    # Create authorization code, passing any PKCE challenge so it is stored
+    # alongside the code and can be verified at the token endpoint.
+    my $pkce = $code_challenge
+        ? { code_challenge => $code_challenge, code_challenge_method => 'S256' }
+        : undef;
     my $code = $c->openidconnect->store->create_authorization_code(
-        $client_id, $user_claims, $scope, $redirect_uri, $nonce
+        $client_id, $user_claims, $scope, $redirect_uri, $nonce, $pkce
     );
 
     # Store authorization in session for later token request
     $c->session->{oidc_code}->{$code} = {
-        client_id    => $client_id,
-        user         => $user_claims,
-        scope        => $scope,
-        redirect_uri => $redirect_uri,
-        nonce        => $nonce,
+        client_id             => $client_id,
+        user                  => $user_claims,
+        scope                 => $scope,
+        redirect_uri          => $redirect_uri,
+        nonce                 => $nonce,
+        code_challenge        => $code_challenge,
+        code_challenge_method => $code_challenge ? 'S256' : undef,
     };
 
     # Clear the stored authorization request after resuming the flow.
@@ -298,10 +364,19 @@ POST /openidconnect/logout
 
 Logout endpoint to invalidate tokens and clear sessions.
 
+Implements OpenID Connect RP-Initiated Logout 1.0.
+
 Parameters:
-  - id_token_hint: The ID token being logged out
-  - post_logout_redirect_uri: Where to redirect after logout
-  - state: State parameter for redirect
+  - id_token_hint (REQUIRED when post_logout_redirect_uri is supplied): A
+    previously issued ID Token identifying the client requesting logout.
+    The token's signature is verified to confirm it was issued by this server.
+    Expiry is intentionally not checked — hint tokens are often expired.
+  - post_logout_redirect_uri (OPTIONAL): URL to redirect to after logout.
+    Must be registered in the client's C<post_logout_redirect_uris> list.
+    Providing this parameter without a valid C<id_token_hint> is rejected
+    with an C<invalid_request> error to prevent open-redirect attacks.
+  - state (OPTIONAL): Opaque value returned verbatim in the redirect query
+    string (only when post_logout_redirect_uri is also provided).
 
 =cut
 
@@ -311,6 +386,30 @@ sub logout : Local {
     my $config = $c->openidconnect->config;
 
     $c->log->debug('Logout endpoint accessed') if $config->{debug};
+
+    my $redirect_uri   = $c->request->params->{post_logout_redirect_uri};
+    my $id_token_hint  = $c->request->params->{id_token_hint};
+    my $state          = $c->request->params->{state};
+
+    # Decode the hint early — before the session is destroyed — so that we
+    # have the subject identifier available for refresh token revocation (MED-1).
+    my $hint_claims;
+    if ($id_token_hint) {
+        $hint_claims = $c->openidconnect->jwt->decode_id_token_hint($id_token_hint);
+    }
+
+    # Determine the subject identifier for refresh token revocation.  Prefer
+    # the hint (authoritative); fall back to the live session so that
+    # logout-without-hint still revokes tokens when the session is present.
+    my $logout_sub = do {
+        if ( $hint_claims && $hint_claims->{sub} ) {
+            $hint_claims->{sub};
+        }
+        else {
+            my $sess_user = eval { $c->session->{user} };
+            $sess_user ? ( $sess_user->{sub} || $sess_user->{id} ) : undef;
+        }
+    };
 
     # Clear user session
     if ( $c->user ) {
@@ -324,11 +423,65 @@ sub logout : Local {
         $c->delete_session('User session destroyed');
     }
 
-    my $redirect_uri = $c->request->params->{post_logout_redirect_uri};
+    # Revoke all outstanding refresh tokens for this user (MED-1).
+    if ($logout_sub) {
+        $c->openidconnect->store->revoke_refresh_tokens_for_user($logout_sub);
+        $c->log->debug("Refresh tokens revoked for user: $logout_sub")
+            if $config->{debug};
+    }
+
     if ($redirect_uri) {
-        $c->log->debug("Redirecting to post-logout URI: $redirect_uri") if $config->{debug};
-        # Validate redirect URI (in production, check against registered URIs)
-        return $c->response->redirect($redirect_uri);
+        # id_token_hint is required when a redirect is requested so that we
+        # can identify the client and verify the URI is registered for it.
+        # Without this check an attacker could redirect to any arbitrary URL.
+        unless ($id_token_hint) {
+            $c->log->warn('post_logout_redirect_uri provided without id_token_hint');
+            return $self->_json_error( $c, 'invalid_request',
+                'id_token_hint is required when post_logout_redirect_uri is provided' );
+        }
+
+        # $hint_claims was decoded above; reject if invalid.
+        unless ($hint_claims) {
+            $c->log->warn('Invalid id_token_hint provided at logout');
+            return $self->_json_error( $c, 'invalid_request', 'Invalid id_token_hint' );
+        }
+
+        # aud may be a string or an array per RFC 7519 §4.1.3.
+        my $aud       = $hint_claims->{aud};
+        my $client_id = ref $aud eq 'ARRAY' ? $aud->[0] : $aud;
+
+        unless ($client_id) {
+            $c->log->warn('id_token_hint is missing the aud claim');
+            return $self->_json_error( $c, 'invalid_request',
+                'id_token_hint does not contain an aud claim' );
+        }
+
+        # Look up the client and validate the redirect URI against its
+        # registered post_logout_redirect_uris list.
+        my $client = $c->openidconnect->get_client($client_id);
+        unless ($client) {
+            $c->log->warn("Unknown client in id_token_hint aud claim: $client_id");
+            return $self->_json_error( $c, 'invalid_request',
+                'Unknown client in id_token_hint' );
+        }
+
+        my @allowed = _normalize_uri_list( $client->{post_logout_redirect_uris} );
+        unless ( grep { $_ eq $redirect_uri } @allowed ) {
+            $c->log->warn(
+                "Unregistered post_logout_redirect_uri for client $client_id: $redirect_uri"
+            );
+            return $self->_json_error( $c, 'invalid_request',
+                'post_logout_redirect_uri is not registered for this client' );
+        }
+
+        # Build the final redirect URI, appending state if supplied.
+        my $final_uri = URI->new($redirect_uri);
+        $final_uri->query_form( $final_uri->query_form, state => $state )
+            if defined $state && $state ne '';
+
+        $c->log->debug( 'Redirecting to post-logout URI: ' . $final_uri->as_string )
+            if $config->{debug};
+        return $c->response->redirect( $final_uri->as_string );
     }
 
     # Return success JSON response
@@ -336,6 +489,31 @@ sub logout : Local {
     $self->_json_response( $c, {
         message => 'Logged out successfully',
     });
+}
+
+# Verify a PKCE code_verifier against a stored code_challenge.
+# Only S256 (SHA-256) is supported; 'plain' is intentionally rejected.
+# Returns a true value on success, false on failure.
+sub _verify_pkce {
+    my ( $code_verifier, $code_challenge ) = @_;
+    return 0 unless defined $code_verifier && defined $code_challenge;
+    # Verifier must contain only unreserved URI chars and be 43-128 chars (RFC 7636 §4.1)
+    return 0 unless $code_verifier =~ /\A[A-Za-z0-9\-._~]{43,128}\z/;
+    # S256: BASE64URL( SHA256( ASCII( code_verifier ) ) )
+    my $computed = encode_base64url( sha256($code_verifier) );
+    return slow_eq( $computed, $code_challenge );
+}
+
+# Normalise a redirect-URI config field.
+# Accepts either an arrayref (YAML / JSON / Perl hash config) or a
+# whitespace-delimited string (Config::General / Apache-style config).
+# Returns a flat list of URI strings.
+# Used for both redirect_uris and post_logout_redirect_uris so that both
+# fields behave identically regardless of config format.
+sub _normalize_uri_list {
+    my ($field) = @_;
+    return () unless defined $field;
+    return ref $field eq 'ARRAY' ? @$field : split /\s+/, $field;
 }
 
 =head2 jwks
@@ -400,6 +578,7 @@ sub _handle_authorization_code_grant {
     my $redirect_uri  = $c->request->params->{redirect_uri};
     my $client_id     = $c->request->params->{client_id};
     my $client_secret = $c->request->params->{client_secret};
+    my $code_verifier = $c->request->params->{code_verifier};
 
     unless ( $code && $redirect_uri ) {
         $c->log->warn('Missing code or redirect_uri in token request');
@@ -408,12 +587,22 @@ sub _handle_authorization_code_grant {
 
     $c->log->debug("Token request - code: $code, client_id: $client_id") if $config->{debug};
 
-    # Get authorization code to validate and extract client_id if not provided
-    my $code_data = $c->openidconnect->store->get_authorization_code($code);
+    # Atomically consume (fetch + delete) the authorization code.
+    # Using consume_authorization_code rather than a separate get + delete
+    # eliminates the TOCTOU race that would otherwise allow two concurrent
+    # requests carrying the same code to both succeed (HIGH-4).
+    # Per RFC 6749 §4.1.2 any code that fails subsequent validation must
+    # also be treated as used, which this pattern naturally enforces.
+    my $code_data = $c->openidconnect->store->consume_authorization_code($code);
     unless ($code_data) {
-        $c->log->warn("Authorization code not found or expired: $code");
+        $c->log->warn("Authorization code not found, expired, or already used: $code");
         return $self->_json_error( $c, 'invalid_grant', 'Authorization code not found or expired' );
     }
+    $c->log->debug("Authorization code consumed: $code") if $config->{debug};
+
+    # Remove session copy of this code so stale claims/scope/nonce do not
+    # accumulate in the session store beyond the code's 10-minute lifetime (MED-5).
+    delete $c->session->{oidc_code}->{$code};
 
     # Use client_id from authorization code if not provided in request (public client flow)
     $client_id ||= $code_data->{client_id};
@@ -424,11 +613,24 @@ sub _handle_authorization_code_grant {
         return $self->_json_error( $c, 'invalid_grant', 'Redirect URI mismatch' );
     }
 
+    # PKCE verification (RFC 7636)
+    if ( $code_data->{code_challenge} ) {
+        unless ( defined $code_verifier ) {
+            $c->log->warn("PKCE code_verifier missing for client: $client_id");
+            return $self->_json_error( $c, 'invalid_grant', 'code_verifier is required' );
+        }
+        unless ( _verify_pkce( $code_verifier, $code_data->{code_challenge} ) ) {
+            $c->log->warn("PKCE verification failed for client: $client_id");
+            return $self->_json_error( $c, 'invalid_grant', 'code_verifier is invalid' );
+        }
+        $c->log->debug('PKCE verification passed') if $config->{debug};
+    }
+
     # If client_secret is provided, verify client credentials (confidential client)
     if ($client_secret) {
         $c->log->debug("Verifying client credentials for: $client_id") if $config->{debug};
         my $client = $c->openidconnect->get_client($client_id);
-        unless ( $client && $client->{client_secret} eq $client_secret ) {
+        unless ( $client && slow_eq( $client->{client_secret}, $client_secret ) ) {
             $c->log->warn("Client authentication failed for: $client_id");
             return $self->_json_error( $c, 'invalid_client', 'Client authentication failed' );
         }
@@ -440,10 +642,6 @@ sub _handle_authorization_code_grant {
             return $self->_json_error( $c, 'invalid_client', 'Unknown client' );
         }
     }
-
-    # Consume the code (one-time use)
-    $c->openidconnect->store->consume_authorization_code($code);
-    $c->log->debug("Authorization code consumed: $code") if $config->{debug};
 
     # User claims were extracted and stored at authorization time, so
     # $code_data->{user} is already the mapped claims hashref.
@@ -472,14 +670,22 @@ sub _handle_authorization_code_grant {
     my $access_token = $c->openidconnect->jwt->create_access_token(%access_token_payload);
     $c->log->debug('Access token created') if $config->{debug};
 
+    # Issue a refresh token with a unique JTI and register the JTI in the
+    # store so the token endpoint can enforce single-use semantics (MED-1).
+    my $rt_jti = $_uuid->create_str();
+    my $rt_ttl = 30 * 24 * 3600;  # 30 days
     my %refresh_token_payload = (
         sub => $user_claims->{sub},
         aud => $client_id,
-        exp => $now + ( 30 * 24 * 3600 ),  # 30 days
+        jti => $rt_jti,
+        exp => $now + $rt_ttl,
     );
 
     my $refresh_token = $c->openidconnect->jwt->create_refresh_token(%refresh_token_payload);
-    $c->log->debug('Refresh token created') if $config->{debug};
+    $c->openidconnect->store->store_refresh_token(
+        $rt_jti, $user_claims->{sub}, $client_id, $rt_ttl,
+    );
+    $c->log->debug('Refresh token created and JTI registered') if $config->{debug};
 
     $c->log->info("Tokens issued for client: $client_id, user: " . $user_claims->{sub});
 
@@ -513,7 +719,7 @@ sub _handle_refresh_token_grant {
 
     # Verify client
     my $client = $c->openidconnect->get_client($client_id);
-    unless ( $client && $client->{client_secret} eq $client_secret ) {
+    unless ( $client && slow_eq( $client->{client_secret}, $client_secret ) ) {
         $c->log->warn("Client authentication failed for: $client_id");
         return $self->_json_error( $c, 'invalid_client', 'Client authentication failed' );
     }
@@ -529,6 +735,23 @@ sub _handle_refresh_token_grant {
         return $self->_json_error( $c, 'invalid_grant', 'Invalid refresh token' );
     };
 
+    # Enforce single-use via JTI (MED-1).  All tokens issued after this fix
+    # carry a jti registered in the store.  Tokens without a jti (issued before
+    # the fix) are rejected to prevent indefinite re-use of old long-lived tokens.
+    my $jti = $payload->{jti};
+    unless ( defined $jti ) {
+        $c->log->warn("Refresh token missing jti claim for client: $client_id");
+        return $self->_json_error( $c, 'invalid_grant',
+            'Refresh token is not valid (missing jti)' );
+    }
+
+    unless ( $c->openidconnect->store->consume_refresh_token($jti) ) {
+        $c->log->warn("Refresh token jti already used or revoked: $jti");
+        return $self->_json_error( $c, 'invalid_grant',
+            'Refresh token has already been used or revoked' );
+    }
+    $c->log->debug("Refresh token jti consumed: $jti") if $config->{debug};
+
     # Create new access token
     my $now = time();
     my %new_payload = (
@@ -540,12 +763,28 @@ sub _handle_refresh_token_grant {
     my $access_token = $c->openidconnect->jwt->create_access_token(%new_payload);
     $c->log->debug('New access token created from refresh token') if $config->{debug};
 
+    # Rotate refresh token: issue a new one with a fresh JTI (MED-1).
+    my $new_rt_jti = $_uuid->create_str();
+    my $rt_ttl     = 30 * 24 * 3600;
+    my %new_rt_payload = (
+        sub => $payload->{sub},
+        aud => $client_id,
+        jti => $new_rt_jti,
+        exp => $now + $rt_ttl,
+    );
+    my $new_refresh_token = $c->openidconnect->jwt->create_refresh_token(%new_rt_payload);
+    $c->openidconnect->store->store_refresh_token(
+        $new_rt_jti, $payload->{sub}, $client_id, $rt_ttl,
+    );
+    $c->log->debug('Refresh token rotated') if $config->{debug};
+
     $c->log->info("Access token refreshed for client: $client_id, user: " . $payload->{sub});
 
     $self->_json_response( $c, {
-        access_token => $access_token,
-        token_type   => 'Bearer',
-        expires_in   => 3600,
+        access_token  => $access_token,
+        token_type    => 'Bearer',
+        expires_in    => 3600,
+        refresh_token => $new_refresh_token,
     });
 }
 

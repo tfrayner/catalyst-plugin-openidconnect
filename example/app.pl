@@ -6,6 +6,7 @@ use warnings;
 use FindBin;
 use lib "$FindBin::Bin/../lib";
 use lib "$FindBin::Bin/lib";
+use Data::UUID;
 
 # Explicitly require the OpenIDConnect controller before app setup
 require OIDCExample::Controller::OpenIDConnect;
@@ -36,18 +37,23 @@ __PACKAGE__->config(
         # Client configurations
         clients => {
             'example-client' => {
-                client_secret => 'example-client-secret',
-                redirect_uris => 'http://localhost:3000/callback',
-                response_types => 'code',
-                grant_types => 'authorization_code refresh_token',
-                scope => 'openid profile email',
+                client_secret             => 'example-client-secret',
+                redirect_uris             => ['http://localhost:3000/callback'],
+                post_logout_redirect_uris => ['http://localhost:3000/logged-out'],
+                response_types            => 'code',
+                grant_types               => 'authorization_code refresh_token',
+                scope                     => 'openid profile email',
             },
             'test-app' => {
-                client_secret => 'test-secret-12345',
-                redirect_uris => 'http://localhost:8080/auth/callback http://localhost:8080/callback',
-                response_types => 'code',
-                grant_types => 'authorization_code refresh_token',
-                scope => 'openid profile email phone',
+                client_secret             => 'test-secret-12345',
+                redirect_uris             => [
+                    'http://localhost:8080/auth/callback',
+                    'http://localhost:8080/callback',
+                ],
+                post_logout_redirect_uris => ['http://localhost:8080/logout-complete'],
+                response_types            => 'code',
+                grant_types               => 'authorization_code refresh_token',
+                scope                     => 'openid profile email phone',
             },
         },
         
@@ -146,8 +152,13 @@ sub login : Local {
             # IMPORTANT: The 'back' parameter is used by the OpenID Connect plugin
             # to resume the authorization flow after successful authentication.
             # Always redirect to it if provided to properly complete the OIDC flow.
+            #
+            # Security: restrict 'back' to relative paths on this server only.
+            # Reject absolute URLs and protocol-relative URLs (e.g. //evil.example.com/)
+            # to prevent open-redirect attacks (HIGH-1).
             my $back = $c->request->params->{back} || '/';
-            return $c->response->redirect($back);
+            $back = '/' unless $back =~ m{^/[^/]};
+            return $c->response->redirect( $c->uri_for($back) );
         }
 
         $c->stash->{error} = 'Invalid username';
@@ -188,11 +199,13 @@ sub logout : Local {
     $c->response->redirect( $c->uri_for('/') );
 }
 
+my $_uuid_gen = Data::UUID->new();
+
 sub _create_mock_user {
     my ($username) = @_;
 
     return {
-        id         => int(rand(10000)) + 1000,
+        id         => $_uuid_gen->create_str(),
         username   => $username,
         name       => "User $username",
         email      => "$username\@example.com",

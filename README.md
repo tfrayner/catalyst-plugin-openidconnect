@@ -97,6 +97,7 @@ use MyApp::Controller::OpenIDConnect;
             client_id = my-client-id
             client_secret = my-client-secret
             redirect_uris = http://localhost:3000/callback
+            post_logout_redirect_uris = http://localhost:3000/logged-out
             response_types = code
             grant_types = authorization_code refresh_token
             scope = openid profile email
@@ -242,7 +243,8 @@ Returns the OpenID Connect provider configuration in JSON format.
 
 - `client_id`: Unique client identifier
 - `client_secret`: Client secret for token endpoint
-- `redirect_uris`: Space or newline-separated list of allowed redirect URIs
+- `redirect_uris`: Arrayref or whitespace-separated string of URIs the client is permitted to redirect to after authorization. At least one entry is required.
+- `post_logout_redirect_uris`: Arrayref or whitespace-separated string of URIs the client is permitted to redirect to after logout. Required when the client will use `post_logout_redirect_uri` at the logout endpoint.
 - `response_types`: Space-separated response types (e.g., "code" or "code id_token")
 - `grant_types`: Space-separated grant types (e.g., "authorization_code refresh_token")
 - `scope`: Space-separated list of scopes the client can request

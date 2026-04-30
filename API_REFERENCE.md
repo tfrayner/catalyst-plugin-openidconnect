@@ -65,6 +65,8 @@ Initiates an OpenID Connect authorization request.
 | scope | string | No | Space-separated scopes (default: "openid") |
 | state | string | Recommended | CSRF protection state value |
 | nonce | string | No | Session binding nonce (client validates it matches auth request) |
+| code_challenge | string | Conditional | PKCE challenge value (RFC 7636). **Required for public clients** (those without a `client_secret`). Strongly recommended for all clients. Value is `BASE64URL(SHA256(ASCII(code_verifier)))`. |
+| code_challenge_method | string | Conditional | Must be `S256` when `code_challenge` is provided. `plain` is not supported. |
 | prompt | string | No | "login" to force re-authentication |
 | max_age | integer | No | Maximum age of authentication (seconds) |
 | ui_locales | string | No | Preferred UI locales |
@@ -135,7 +137,8 @@ Exchanges an authorization code or refresh token for tokens.
 | code | string | Yes | The authorization code |
 | redirect_uri | string | Yes | Must match authorization request |
 | client_id | string | Yes | The client identifier |
-| client_secret | string | Yes | The client secret |
+| client_secret | string | Conditional | The client secret. Omit for public clients (those without a registered `client_secret`). |
+| code_verifier | string | Conditional | PKCE verifier string (43–128 unreserved URI characters). Required when `code_challenge` was sent in the authorization request. |
 
 **Example Request:**
 
@@ -320,17 +323,20 @@ Host: localhost:5000
 
 ### POST /openidconnect/logout
 
-Logs out the user and invalidates their session.
+Logs out the user and invalidates their session. Implements [OpenID Connect
+RP-Initiated Logout 1.0](https://openid.net/specs/openid-connect-rpinitiated-1_0.html).
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| id_token_hint | string | No | The user's ID token |
-| post_logout_redirect_uri | string | No | Where to redirect after logout |
-| state | string | No | State for redirect |
+| id_token_hint | string | Conditional | A previously issued ID Token. **Required** when `post_logout_redirect_uri` is supplied. The token's signature is verified to identify the client; expiry is intentionally not checked. |
+| post_logout_redirect_uri | string | No | URI to redirect to after logout. Must be registered in the client's `post_logout_redirect_uris` list. Requires `id_token_hint`. |
+| state | string | No | Opaque value returned verbatim in the redirect (only when `post_logout_redirect_uri` is also provided). |
 
-**Example Request:**
+> **Security note:** Providing `post_logout_redirect_uri` without a valid `id_token_hint` is rejected with `invalid_request`. The redirect URI is validated by exact string match against the client's registered `post_logout_redirect_uris` list — prefix matching and host-only matching are not permitted.
+
+**Example Request (with redirect):**
 
 ```
 POST /openidconnect/logout HTTP/1.1
@@ -338,24 +344,78 @@ Host: localhost:5000
 Content-Type: application/x-www-form-urlencoded
 
 id_token_hint=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...&
-post_logout_redirect_uri=https://app.example.com/&
+post_logout_redirect_uri=https://app.example.com/logged-out&
 state=xyz789
 ```
 
-**Success Response:**
+**Example Request (without redirect):**
 
-If `post_logout_redirect_uri` is provided:
+```
+POST /openidconnect/logout HTTP/1.1
+Host: localhost:5000
+Content-Type: application/x-www-form-urlencoded
+
+id_token_hint=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Success Response — redirect:**
 ```
 HTTP/1.1 302 Found
-Location: https://app.example.com/?state=xyz789
+Location: https://app.example.com/logged-out?state=xyz789
 ```
 
-Otherwise:
+**Success Response — no redirect:**
+```json
+{
+  "message": "Logged out successfully"
+}
 ```
-HTTP/1.1 200 OK
-Content-Type: text/plain
 
-Logged out successfully
+**Error Responses:**
+
+```json
+{
+  "error": "invalid_request",
+  "error_description": "id_token_hint is required when post_logout_redirect_uri is provided"
+}
+```
+
+```json
+{
+  "error": "invalid_request",
+  "error_description": "post_logout_redirect_uri is not registered for this client"
+}
+```
+
+**Error Codes:**
+
+| Code | Description |
+|------|-------------|
+| invalid_request | `post_logout_redirect_uri` supplied without `id_token_hint`, hint token invalid, client unknown, or URI not registered |
+
+**Client registration requirement:**
+
+To use `post_logout_redirect_uri`, each client must declare its permitted
+post-logout redirect URIs in the server configuration:
+
+```
+# catalyst.conf (Apache-style)
+<clients>
+    <my-app>
+        post_logout_redirect_uris = https://app.example.com/logged-out
+    </my-app>
+</clients>
+```
+
+```perl
+# Perl hash config
+clients => {
+    'my-app' => {
+        post_logout_redirect_uris => [
+            'https://app.example.com/logged-out',
+        ],
+    },
+},
 ```
 
 ---
@@ -519,6 +579,53 @@ Response:
   "refresh_token": "tGzv3JOkF0XG5Qx2TlKWIA"
 }
 ```
+
+---
+
+### PKCE-Protected Authorization Code Flow (RFC 7636)
+
+PKCE (Proof Key for Code Exchange) protects the authorization code grant against
+interception attacks. It is **required for public clients** and recommended for all clients.
+
+#### 1. Generate Verifier and Challenge
+
+```bash
+# code_verifier: 43-128 random unreserved URI characters
+CODE_VERIFIER=$(openssl rand -base64 60 | tr -d '+/=' | head -c 64)
+
+# code_challenge: BASE64URL(SHA256(ASCII(code_verifier)))
+CODE_CHALLENGE=$(printf '%s' "$CODE_VERIFIER" | openssl dgst -sha256 -binary | openssl base64 | tr '+/' '-_' | tr -d '=')
+```
+
+#### 2. Initiate Authorization with Challenge
+
+```bash
+curl -G "http://localhost:5000/openidconnect/authorize" \
+  --data-urlencode "response_type=code" \
+  --data-urlencode "client_id=my-public-client" \
+  --data-urlencode "redirect_uri=http://app.example.com/callback" \
+  --data-urlencode "scope=openid profile" \
+  --data-urlencode "state=random-state" \
+  --data-urlencode "code_challenge=$CODE_CHALLENGE" \
+  --data-urlencode "code_challenge_method=S256"
+```
+
+#### 3. Exchange Code Using Verifier (no `client_secret` for public clients)
+
+```bash
+curl -X POST http://localhost:5000/openidconnect/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=authorization_code" \
+  -d "code=<auth_code>" \
+  -d "redirect_uri=http://app.example.com/callback" \
+  -d "client_id=my-public-client" \
+  -d "code_verifier=$CODE_VERIFIER"
+```
+
+Confidential clients with a `client_secret` can also use PKCE — include both
+`client_secret` and `code_verifier`.
+
+---
 
 #### 3. Get User Information
 

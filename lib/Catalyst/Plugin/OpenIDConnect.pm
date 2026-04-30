@@ -18,7 +18,7 @@ use DateTime::Format::ISO8601;
 use Data::UUID;
 use URI;
 
-our $VERSION = '0.03';
+our $VERSION = '0.08';
 
 =head1 NAME
 
@@ -100,9 +100,12 @@ namespace conflicts with ACL and other route-processing plugins.
 
 requires 'config', 'log', 'uri_for', 'user', 'request', 'response';
 
-# Package-level storage for JWT and Store instances
-our $_oidc_jwt_instance;
-our $_oidc_store_instance;
+# Per-application-class storage for JWT and Store instances.
+# Keyed by consuming application class name so that multiple Catalyst apps
+# loaded in the same Perl interpreter each hold their own instances and cannot
+# accidentally overwrite each other's JWT keys or stores (MED-3).
+my %_oidc_jwt_by_class;
+my %_oidc_store_by_class;
 
 =head1 ATTRIBUTES
 
@@ -115,12 +118,13 @@ JWT handler instance.
 # Accessor method for JWT handler
 sub _oidc_jwt {
     my ($self, $value) = @_;
+    my $class = ref($self) || $self;
     if (defined $value) {
         die 'JWT handler must be an instance of Catalyst::Plugin::OpenIDConnect::Utils::JWT'
             unless ref $value && $value->isa('Catalyst::Plugin::OpenIDConnect::Utils::JWT');
-        $_oidc_jwt_instance = $value;
+        $_oidc_jwt_by_class{$class} = $value;
     }
-    return $_oidc_jwt_instance;
+    return $_oidc_jwt_by_class{$class};
 }
 
 =head2 _oidc_store
@@ -132,19 +136,24 @@ State and code storage.
 # Accessor method for Store handler
 sub _oidc_store {
     my ($self, $value) = @_;
+    my $class = ref($self) || $self;
     if (defined $value) {
         die 'Store handler must implement Catalyst::Plugin::OpenIDConnect::Role::Store'
             unless ref $value && $value->DOES('Catalyst::Plugin::OpenIDConnect::Role::Store');
-        $_oidc_store_instance = $value;
+        $_oidc_store_by_class{$class} = $value;
     }
-    return $_oidc_store_instance;
+    return $_oidc_store_by_class{$class};
 }
 
 =head1 METHODS
 
 =head2 setup
 
-Catalyst setup hook - initialize the plugin.
+Catalyst setup hook - initialize the plugin. Note that this hook can effectively be blocked
+in the consuming app by a similar setup method checking for configuration and deleting 
+$config->{issuer} if not properly configured. This allows the consuming app to control whether 
+the plugin initializes or not, which is useful for example in FastCGI deployments where multiple 
+apps share the same codebase but only some are OIDC providers.
 
 =cut
 

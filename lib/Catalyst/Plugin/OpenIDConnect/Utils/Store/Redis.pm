@@ -152,17 +152,19 @@ sub _build_redis {
 
 =head1 METHODS
 
-=head2 create_authorization_code($client_id, $user, $scope, $redirect_uri, $nonce)
+=head2 create_authorization_code($client_id, $user, $scope, $redirect_uri, $nonce, $pkce)
 
 Creates an authorization code and stores it in Redis with an automatic TTL equal
-to L</code_ttl> seconds.
+to L</code_ttl> seconds.  C<$pkce> is an optional hashref with keys
+C<code_challenge> and C<code_challenge_method>; omit or pass C<undef> for
+non-PKCE flows.
 
 Returns the authorization code string.
 
 =cut
 
 sub create_authorization_code {
-    my ( $self, $client_id, $user, $scope, $redirect_uri, $nonce ) = @_;
+    my ( $self, $client_id, $user, $scope, $redirect_uri, $nonce, $pkce ) = @_;
 
     $self->logger->debug("Creating authorization code for client: $client_id")
         if $self->logger;
@@ -171,13 +173,17 @@ sub create_authorization_code {
     my $now  = time();
 
     my $data = encode_json({
-        client_id    => $client_id,
-        user         => $user,
-        scope        => $scope,
-        redirect_uri => $redirect_uri,
-        nonce        => $nonce,
-        created_at   => $now,
-        expires_at   => $now + $self->code_ttl,
+        client_id             => $client_id,
+        user                  => $user,
+        scope                 => $scope,
+        redirect_uri          => $redirect_uri,
+        nonce                 => $nonce,
+        created_at            => $now,
+        expires_at            => $now + $self->code_ttl,
+        ( $pkce ? (
+            code_challenge        => $pkce->{code_challenge},
+            code_challenge_method => $pkce->{code_challenge_method},
+        ) : () ),
     });
 
     $self->_redis->setex( $self->prefix . $code, $self->code_ttl, $data );
@@ -221,8 +227,13 @@ sub get_authorization_code {
 
 =head2 consume_authorization_code($code)
 
-Atomically deletes the authorization code from Redis, enforcing single-use
-semantics.
+Atomically fetches and deletes the authorization code from Redis using the
+C<GETDEL> command (Redis E<ge> 6.2).  Because C<GETDEL> is a single server-side
+operation it is race-free: a second concurrent request carrying the same code
+will receive C<nil> from Redis and be rejected.
+
+Returns the decoded code data hashref on success, or C<undef> if the code
+does not exist, has already been consumed, or cannot be decoded.
 
 =cut
 
@@ -230,7 +241,78 @@ sub consume_authorization_code {
     my ( $self, $code ) = @_;
 
     $self->logger->debug("Consuming authorization code: $code") if $self->logger;
-    $self->_redis->del( $self->prefix . $code );
+
+    # GETDEL (Redis >= 6.2) fetches and deletes atomically in a single
+    # round-trip, eliminating the GET + DEL race condition (HIGH-4).
+    my $raw = $self->_redis->getdel( $self->prefix . $code );
+    return unless defined $raw;
+
+    my $data = try {
+        decode_json($raw);
+    }
+    catch {
+        $self->logger->warn("Failed to decode consumed authorization code data: $_")
+            if $self->logger;
+        undef;
+    };
+
+    $self->logger->debug("Authorization code consumed: $code") if $self->logger && $data;
+    return $data;
+}
+
+=head2 store_refresh_token($jti, $sub, $client_id, $ttl)
+
+Stores a refresh token JTI in Redis with C<SETEX> using C<$ttl> seconds.  Also
+maintains a secondary per-subject Set (C<{prefix}rt_sub:{sub}>) so that all
+tokens for a user can be revoked atomically at logout time.
+
+=cut
+
+sub store_refresh_token {
+    my ( $self, $jti, $sub, $client_id, $ttl ) = @_;
+    my $data = encode_json({ sub => $sub, client_id => $client_id });
+    $self->_redis->setex( $self->prefix . 'rt:' . $jti, $ttl, $data );
+    # Secondary index for bulk-revocation at logout.
+    my $set_key = $self->prefix . 'rt_sub:' . $sub;
+    $self->_redis->sadd( $set_key, $jti );
+    $self->_redis->expire( $set_key, $ttl );
+}
+
+=head2 consume_refresh_token($jti)
+
+Atomically fetches and deletes the JTI entry using C<GETDEL> (Redis E<ge> 6.2).
+Returns the decoded data hashref, or C<undef> if absent (already used, revoked,
+or expired).
+
+=cut
+
+sub consume_refresh_token {
+    my ( $self, $jti ) = @_;
+    my $raw = $self->_redis->getdel( $self->prefix . 'rt:' . $jti );
+    return unless defined $raw;
+    my $data = try { decode_json($raw) } catch { undef };
+    if ($data) {
+        $self->_redis->srem( $self->prefix . 'rt_sub:' . $data->{sub}, $jti );
+    }
+    return $data;
+}
+
+=head2 revoke_refresh_tokens_for_user($sub)
+
+Revokes all outstanding refresh tokens for the given subject by iterating the
+per-subject Redis Set and deleting each JTI key, then deleting the Set itself.
+Called at logout time.
+
+=cut
+
+sub revoke_refresh_tokens_for_user {
+    my ( $self, $sub ) = @_;
+    my $set_key = $self->prefix . 'rt_sub:' . $sub;
+    my @jtis    = $self->_redis->smembers($set_key);
+    for my $jti (@jtis) {
+        $self->_redis->del( $self->prefix . 'rt:' . $jti );
+    }
+    $self->_redis->del($set_key);
 }
 
 # Generate a cryptographically secure random string for authorization codes.
