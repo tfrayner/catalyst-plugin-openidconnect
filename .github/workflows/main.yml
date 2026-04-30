@@ -1,11 +1,17 @@
-  linux:
+on:
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  test:
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
+        perl-version:
           - '5.38'
-          - '5.28'
+          - '5.10'
 
     container:
       image: perldocker/perl-tester:${{ matrix.perl-version }}
