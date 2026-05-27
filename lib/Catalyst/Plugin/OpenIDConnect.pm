@@ -18,13 +18,26 @@ use DateTime::Format::ISO8601;
 use Data::UUID;
 use URI;
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 
 =head1 NAME
 
 Catalyst::Plugin::OpenIDConnect - OpenID Connect provider plugin for Catalyst
 
-=head1 SYNOPSIS
+=head1 DESCRIPTION
+
+A Catalyst plugin implementing the OpenID Connect specification,
+providing OAuth 2.0 authentication and authorization. Note that this plugin 
+does not implement the OIDC Client role; it is intended for applications 
+acting as OIDC providers (authorization servers).
+
+This plugin provides the core OpenIDConnect functionality (JWT handling, 
+state management, and a reusable controller). To use it in your application, 
+you must create a controller in your app's namespace that extends the plugin's 
+controller (see below). This allows you to keep full control over your routing
+while cooperating with ACL and other route-processing plugins.
+
+=head1 CONFIGURATION
 
     package MyApp;
     use Catalyst qw/
@@ -57,7 +70,8 @@ Catalyst::Plugin::OpenIDConnect - OpenID Connect provider plugin for Catalyst
 =head1 CREATING THE OPENIDCONNECT CONTROLLER
 
 To enable the OpenIDConnect endpoints, create a controller in your app that extends
-the plugin's controller. Create the file C<lib/MyApp/Controller/OpenIDConnect.pm>:
+the plugin's controller. Create the file C<lib/MyApp/Controller/OpenIDConnect.pm> 
+(where MyApp is your app's namespace) with the following content:
 
     package MyApp::Controller::OpenIDConnect;
 
@@ -85,16 +99,22 @@ Then, in your main app module, explicitly load this controller before setup:
     MyApp->config(...);
     MyApp->setup(...);
 
-=head1 DESCRIPTION
+Setting up the controller in this way allows you to keep full control over your
+routing, and avoid namespace conflicts with ACL and other route-processing plugins.
+The plugin's controller will automatically mount the standard OpenID Connect
+endpoints (e.g. C</authorize>, C</token>, C</userinfo>) under the C</openidconnect>
+path, so you can access them at C</openidconnect/authorize>, etc.
 
-A Catalyst plugin implementing the OpenID Connect specification,
-providing OAuth 2.0 authentication and authorization.
+=head1 ROUTES ADDED TO THE APPLICATION
 
-NOTE: This plugin provides the core OpenIDConnect functionality (JWT handling, 
-state management, and a reusable controller). To use it in your application, 
-you must create a controller in your app's namespace that extends the plugin's 
-controller. This allows you to keep full control over your routing and avoid 
-namespace conflicts with ACL and other route-processing plugins.
+The plugin's controller adds the following routes to the application:
+
+    GET  /.well-known/openid-configuration
+    GET  /openidconnect/authorize
+    POST /openidconnect/token
+    GET  /openidconnect/userinfo
+    GET  /openidconnect/jwks
+    POST /openidconnect/logout
 
 =cut
 

@@ -271,7 +271,7 @@ Decodes a JWT passed as an C<id_token_hint> during logout.
 
 Verifies the token signature against the configured public key to confirm
 it was genuinely issued by this server, but deliberately skips expiry
-validation — hint tokens are frequently expired at logout time by design.
+validation; hint tokens are frequently expired at logout time by design.
 
 Returns a hashref of the token's claims on success, or C<undef> if the
 token is malformed or the signature cannot be verified.

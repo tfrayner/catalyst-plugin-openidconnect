@@ -28,18 +28,34 @@ Catalyst::Plugin::OpenIDConnect::Controller::Root - OIDC Protocol Endpoints
 =head1 SYNOPSIS
 
 Handles OpenID Connect protocol endpoints:
-  - /openidconnect/authorize     - Authorization endpoint
-  - /openidconnect/token         - Token endpoint
-  - /openidconnect/userinfo      - UserInfo endpoint  
-  - /openidconnect/logout        - Logout endpoint
-  - /.well-known/openid-configuration - Discovery endpoint
+
+    /.well-known/openid-configuration - Discovery endpoint
+    /openidconnect/authorize     - Authorization endpoint
+    /openidconnect/token         - Token endpoint
+    /openidconnect/userinfo      - UserInfo endpoint  
+    /openidconnect/logout        - Logout endpoint
+    /openidconnect/jwks          - JWKS endpoint for key discovery
 
 =cut
+
+=head1 DESCRIPTION
+
+This controller implements the core OpenID Connect protocol endpoints.  To use it in your application, create a controller that extends this one:
+
+    package MyApp::Controller::Auth;
+    use Moose;
+    use namespace::autoclean;
+
+    BEGIN { extends 'Catalyst::Plugin::OpenIDConnect::Controller::Root'; }
+
+    __PACKAGE__->meta->make_immutable;
+
+=head1 METHODS
 
 =head2 begin
 
 Called automatically before every action in this controller.  Sets HTTP
-security headers that must be present on all OIDC endpoint responses (MED-6).
+security headers that must be present on all OIDC endpoint responses.
 
 =cut
 
@@ -85,12 +101,13 @@ GET /openidconnect/authorize
 OpenID Connect authorization endpoint.
 
 Query parameters:
-  - response_type (REQUIRED): "code"
-  - client_id (REQUIRED): The client ID
-  - redirect_uri (REQUIRED): Where to redirect after authorization
-  - scope (RECOMMENDED): Space-separated scopes (default: "openid")
-  - state (RECOMMENDED): CSRF protection state parameter
-  - nonce (OPTIONAL): String to bind to the ID token
+
+    - response_type (REQUIRED): "code"
+    - client_id (REQUIRED): The client ID
+    - redirect_uri (REQUIRED): Where to redirect after authorization
+    - scope (RECOMMENDED): Space-separated scopes (default: "openid")
+    - state (RECOMMENDED): CSRF protection state parameter
+    - nonce (OPTIONAL): String to bind to the ID token
 
 =cut
 
@@ -257,18 +274,20 @@ POST /openidconnect/token
 Token endpoint for exchanging authorization code for tokens.
 
 Parameters (form-encoded):
-  - grant_type (REQUIRED): "authorization_code" or "refresh_token"
-  - code (REQUIRED for authorization_code): The authorization code
-  - redirect_uri (REQUIRED): Must match authorization request
-  - client_id (OPTIONAL): The client ID (extracted from code if not provided)
-  - client_secret (OPTIONAL): The client secret (required for confidential clients, optional for public clients)
+
+    - grant_type (REQUIRED): "authorization_code" or "refresh_token"
+    - code (REQUIRED for authorization_code): The authorization code
+    - redirect_uri (REQUIRED): Must match authorization request
+    - client_id (OPTIONAL): The client ID (extracted from code if not provided)
+    - client_secret (OPTIONAL): The client secret (required for confidential clients, optional for public clients)
 
 Returns:
-  - access_token: The access token
-  - token_type: "Bearer"
-  - id_token: The ID token
-  - expires_in: Token expiration in seconds
-  - refresh_token: (optional) Refresh token
+
+    - access_token: The access token
+    - token_type: "Bearer"
+    - id_token: The ID token
+    - expires_in: Token expiration in seconds
+    - refresh_token: (optional) Refresh token
 
 =cut
 
@@ -367,16 +386,17 @@ Logout endpoint to invalidate tokens and clear sessions.
 Implements OpenID Connect RP-Initiated Logout 1.0.
 
 Parameters:
-  - id_token_hint (REQUIRED when post_logout_redirect_uri is supplied): A
-    previously issued ID Token identifying the client requesting logout.
-    The token's signature is verified to confirm it was issued by this server.
-    Expiry is intentionally not checked — hint tokens are often expired.
-  - post_logout_redirect_uri (OPTIONAL): URL to redirect to after logout.
-    Must be registered in the client's C<post_logout_redirect_uris> list.
-    Providing this parameter without a valid C<id_token_hint> is rejected
-    with an C<invalid_request> error to prevent open-redirect attacks.
-  - state (OPTIONAL): Opaque value returned verbatim in the redirect query
-    string (only when post_logout_redirect_uri is also provided).
+
+    - id_token_hint (REQUIRED when post_logout_redirect_uri is supplied): A
+      previously issued ID Token identifying the client requesting logout.
+      The token's signature is verified to confirm it was issued by this server.
+      Expiry is intentionally not checked; hint tokens are often expired.
+    - post_logout_redirect_uri (OPTIONAL): URL to redirect to after logout.
+      Must be registered in the client's C<post_logout_redirect_uris> list.
+      Providing this parameter without a valid C<id_token_hint> is rejected
+      with an C<invalid_request> error to prevent open-redirect attacks.
+    - state (OPTIONAL): Opaque value returned verbatim in the redirect query
+      string (only when post_logout_redirect_uri is also provided).
 
 =cut
 
@@ -862,6 +882,7 @@ sub _bigint_to_base64url {
 }
 
 __PACKAGE__->meta->make_immutable;
+
 1;
 
 =head1 AUTHOR

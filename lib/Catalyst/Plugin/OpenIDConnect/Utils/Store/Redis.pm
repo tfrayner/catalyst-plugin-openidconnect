@@ -40,7 +40,7 @@ backend is safe for multi-process deployments. Code expiry is enforced natively
 by Redis via C<SETEX>, so no background cleanup is needed.
 
 Requires the L<Redis::Fast> module (C<Redis::Fast> is preferred for performance;
-C<Redis> also works — install whichever suits your environment).
+C<Redis> also works; install whichever suits your environment).
 
 =head1 ATTRIBUTES
 
@@ -73,7 +73,8 @@ has prefix => (
 =head2 password
 
 Optional Redis AUTH password. Leave unset if your Redis server does not require
-authentication.
+authentication. If the environment variable C<REDIS_PASSWORD> is set, it will
+be have been passed as the default value for this attribute by the plugin.
 
 =cut
 

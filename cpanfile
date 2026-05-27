@@ -33,4 +33,5 @@ on 'test' => sub {
     requires 'Test::Exception';
     requires 'Test::MockObject';
     requires 'Test::Deep';
+    requires 'Test::Pod::Coverage', '>= 1.04';
 };

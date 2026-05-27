@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.09] - 2026-05-27 POD review and initial CPAN release
+
+### POD documentation
+
+- All perldoc stanzas reviewed and reformatted as needed for clarity.
+- Standard perldoc tests now included.
+- Updated MANIFEST to include all required files.
+
 ## [0.08] - 2026-04-29 (Security Fix: MED-6)
 
 ### Security
