@@ -22,7 +22,7 @@ C<$user_data> must be a plain (unblessed) hashref of the user's OIDC claims,
 as returned by C<get_user_claims()>. Callers are responsible for extracting
 claims from the live user object before calling this method; doing so here
 (rather than in the store) ensures that any application-specific user object
-— DBIx::Class row, LDAP entry, etc. — is resolved while the Catalyst context
+(DBIx::Class row, LDAP entry, etc.) is resolved while the Catalyst context
 is still available, and that the store only ever handles plain serialisable data.
 
 C<$pkce> is an optional hashref with keys C<code_challenge> and
@@ -83,7 +83,7 @@ if the JTI is absent (token has already been used, was explicitly revoked, or
 has expired).
 
 Callers B<must> treat a C<undef> return as C<invalid_grant> and reject the
-request — this is the single-use enforcement mechanism.
+request; this is the single-use enforcement mechanism.
 
 =cut
 

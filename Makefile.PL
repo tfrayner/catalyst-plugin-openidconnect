@@ -1,6 +1,11 @@
 use strict;
 use warnings;
-use ExtUtils::MakeMaker::CPANfile;
+use ExtUtils::MakeMaker;
+use Module::CPANfile;
+
+my $prereqs = Module::CPANfile->load('cpanfile')
+  ->prereqs->merged_requirements(['runtime'], ['requires'])
+  ->as_string_hash;
 
 WriteMakefile(
     NAME           => 'Catalyst::Plugin::OpenIDConnect',
