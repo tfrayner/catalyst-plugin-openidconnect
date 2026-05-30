@@ -411,30 +411,10 @@ Add a `begin` action (or Catalyst middleware) that injects these headers on all 
 
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`  
 **Location:** `authorize` action  
-**Status:** **Open**
+**Status:** **Fixed (2026-05-30)**
 
-**Description:**  
-The `scope` parameter is accepted and stored verbatim without being validated against the scopes registered for the requesting client in the application configuration. A client configured with `scope => 'openid profile email'` can successfully request `scope=openid admin` and will receive tokens bearing the wider scope string. Protected resources that rely on the `scp` claim in access tokens for authorization decisions may grant unwarranted privileges as a result.
-
-```perl
-# Current — any scope string is accepted without validation:
-$scope ||= $stored_auth_request->{scope} || 'openid';
-```
-
-**Recommendation:**  
-Intersect the requested scope with the client's registered scope list. Return an `invalid_scope` error if no overlap exists:
-
-```perl
-my @registered = split /\s+/, ( $client->{scope} // 'openid' );
-my @requested  = split /\s+/, ( $scope // 'openid' );
-my %allowed    = map { $_ => 1 } @registered;
-my @effective  = grep { $allowed{$_} } @requested;
-unless (@effective) {
-    return $self->_error_response( $c, $redirect_uri, 'invalid_scope',
-        'None of the requested scopes are registered for this client', $state );
-}
-$scope = join ' ', @effective;
-```
+**Fix applied:**  
+In Phase 2 of the `authorize` action (after `client_id` and `redirect_uri` are confirmed), the requested scope is intersected with the client's registered scope list. If the intersection is empty, `invalid_scope` is returned via `_error_response`. If `openid` is absent from the effective scope (mandatory per OIDC Core §3.1.2.1), a second `invalid_scope` check fires. `$scope` is then overwritten with the effective (narrowed) scope string before it is stored in the session or passed to `create_authorization_code`, so the `scp` claim in issued access tokens can never exceed what the client is registered for.
 
 ---
 

@@ -181,6 +181,38 @@ sub authorize : Local {
         );
     }
 
+    # Restrict scope to the intersection of what was requested and what this
+    # client is registered for (NEW-MED-2 / RFC 6749 §3.3).
+    # Accepting arbitrary scope strings allows clients to obtain tokens
+    # bearing scopes they were never granted (e.g. "admin").
+    {
+        my @registered = split /\s+/, ( $client->{scope} // 'openid' );
+        my @requested  = split /\s+/, $scope;
+        my %allowed    = map { $_ => 1 } @registered;
+        my @effective  = grep { $allowed{$_} } @requested;
+        unless (@effective) {
+            $c->log->warn(
+                "No permitted scopes in request for client $client_id: $scope"
+            );
+            return $self->_error_response(
+                $c, $redirect_uri, 'invalid_scope',
+                'None of the requested scopes are registered for this client',
+                $state
+            );
+        }
+        # OIDC Core §3.1.2.1 — openid scope is mandatory for OIDC requests.
+        unless ( grep { $_ eq 'openid' } @effective ) {
+            $c->log->warn("Missing openid scope for client $client_id");
+            return $self->_error_response(
+                $c, $redirect_uri, 'invalid_scope',
+                'openid scope is required', $state
+            );
+        }
+        $scope = join ' ', @effective;
+        $c->log->debug("Effective scope for client $client_id: $scope")
+            if $config->{debug};
+    }
+
     # Check if user is authenticated
     unless ( $c->user ) {
         $c->log->debug('User not authenticated, redirecting to login') if $config->{debug};
