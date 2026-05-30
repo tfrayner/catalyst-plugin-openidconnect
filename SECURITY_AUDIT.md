@@ -2,12 +2,15 @@
 
 **Project:** Catalyst::Plugin::OpenIDConnect  
 **Audit Date:** 2026-04-28  
+**Re-Audit Date:** 2026-05-30  
 **Auditor:** GitHub Copilot  
 **Scope:** All source files under `lib/` and `example/`
 
 ---
 
-## Summary
+## Original Audit Summary (2026-04-28)
+
+All findings from the original audit were remediated by 2026-04-29. See individual entries below for status.
 
 | Severity | Count |
 |----------|-------|
@@ -16,6 +19,18 @@
 | Medium   | 6     |
 | Low      | 3     |
 | Info     | 3     |
+
+---
+
+## Re-Audit Summary (2026-05-30)
+
+Five new issues were identified. All original findings remain **Fixed**.
+
+| Severity | New Findings |
+|----------|-------------|
+| High     | 2           |
+| Medium   | 2           |
+| Low      | 1           |
 
 ---
 
@@ -175,6 +190,94 @@ Add `code_challenge` and `code_challenge_method` handling to the authorize endpo
 
 ---
 
+### NEW-HIGH-1 — Open Redirect via Unvalidated `redirect_uri` in Pre-Validation Error Responses
+
+**File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`  
+**Location:** `authorize` action  
+**Status:** **Open**
+
+**Description:**  
+RFC 6749 §4.1.2.1 states that the authorization server MUST NOT automatically redirect the user-agent to an unregistered or invalid redirect URI. Two error paths in the `authorize` action violate this requirement:
+
+1. **`response_type` check** (before redirect URI validation): When `response_type` is not `"code"`, `_error_response` is called with the raw, client-supplied `redirect_uri` before it has been validated against the client's registered list.
+2. **Unknown `client_id`** (before redirect URI validation is possible): When the `client_id` is not found in the configuration, `_error_response` is again called with the unvalidated `redirect_uri`. At this point there is no registered URI list to consult.
+
+An attacker can exploit either path by crafting an authorization URL such as:
+
+```
+/openidconnect/authorize?client_id=known-client
+    &response_type=token
+    &redirect_uri=https://phishing.example.com/
+```
+
+A victim who follows this link — which carries the trusted identity-provider domain — is silently redirected to the attacker-controlled site carrying an OAuth error payload, enabling phishing and credential harvesting.
+
+**Recommendation:**  
+Validate `client_id` and `redirect_uri` against the registered list **before** using either in any redirect. Return a direct HTTP 400 response (no redirect) when validation cannot be completed:
+
+```perl
+# 1. Validate client_id first — return direct error if unknown
+my $client = $c->openidconnect->get_client($client_id)
+    or return $self->_json_error($c, 'invalid_client', 'Unknown client');
+
+# 2. Validate redirect_uri against registered list — return direct error if invalid
+my @allowed_uris = _normalize_uri_list($client->{redirect_uris});
+grep { $_ eq $redirect_uri } @allowed_uris
+    or return $self->_json_error($c, 'invalid_request',
+        'Redirect URI not registered');
+
+# 3. Only now is it safe to use $redirect_uri in _error_response
+unless ($response_type && $response_type eq 'code') {
+    return $self->_error_response($c, $redirect_uri, 'invalid_request',
+        'response_type must be "code"', $state);
+}
+```
+
+---
+
+### NEW-HIGH-2 — Cross-Client Authorization Code Redemption at Token Endpoint
+
+**File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`  
+**Location:** `_handle_authorization_code_grant`  
+**Status:** **Open**
+
+**Description:**  
+The token endpoint does not verify that the `client_id` in the token request matches the `client_id` stored with the authorization code. The relevant assignment is:
+
+```perl
+$client_id ||= $code_data->{client_id};
+```
+
+The stored `client_id` is used only as a fallback when the request omits the field. If the caller provides any non-empty `client_id` it is used unconditionally — regardless of whether it matches the client the code was actually issued to. RFC 6749 §4.1.3 requires the server to "ensure that the authorization code was issued to the authenticated confidential client."
+
+**Attack scenario (confidential clients):**
+
+1. Attacker registers `attacker-client` with `client_secret=attacker-secret`.
+2. Attacker obtains a code issued to `victim-client` (e.g. via referrer header, log exposure, or redirect URI misconfiguration).
+3. Attacker sends: `client_id=attacker-client&client_secret=attacker-secret&code=<victim-code>&redirect_uri=<victim-redirect>`.
+4. Client authentication succeeds because the attacker's own secret is valid for `attacker-client`.
+5. The redirect URI check passes because it matches the value stored in the code from the original request.
+6. Tokens are issued bearing the victim user's identity (`sub`) but with `aud=attacker-client`.
+
+PKCE mitigates this for public clients (the attacker cannot produce a valid `code_verifier` for the victim's `code_challenge`), but confidential clients — for which PKCE is optional — remain vulnerable.
+
+**Recommendation:**  
+After resolving `client_id`, assert that it matches the value stored with the authorization code:
+
+```perl
+$client_id //= $code_data->{client_id};
+if ( $client_id ne $code_data->{client_id} ) {
+    $c->log->warn(
+        "client_id mismatch at token endpoint: "
+        . "request=$client_id stored=$code_data->{client_id}"
+    );
+    return $self->_json_error( $c, 'invalid_grant',
+        'client_id does not match the authorization code' );
+}
+```
+
+---
+
 ## Medium
 
 ### MED-1 — Non-Revocable Refresh Tokens
@@ -317,6 +420,79 @@ Add a `begin` action (or Catalyst middleware) that injects these headers on all 
 
 ---
 
+### NEW-MED-1 — Token Type Confusion at UserInfo Endpoint
+
+**File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`  
+**Location:** `userinfo` action; `lib/Catalyst/Plugin/OpenIDConnect/Utils/JWT.pm`  
+**Status:** **Open**
+
+**Description:**  
+`create_id_token`, `create_access_token`, and `create_refresh_token` all call the same `sign_token` function and produce structurally identical JWTs. No `typ` claim distinguishes token types (RFC 9068 reserves `at+JWT` for access tokens). At the UserInfo endpoint the bearer token is verified with:
+
+```perl
+$payload = $c->openidconnect->jwt->verify_token($token);
+```
+
+No `expected_audience` is supplied and no `typ` check is performed. As a result:
+
+- An **ID token** (valid `iss`, `sub`, `exp`, `aud`) passes `verify_token` and satisfies the UserInfo handler even though it is intended for consumption by a relying party, not for authorizing API requests.
+- A **refresh token** (also a signed JWT with `iss`, `sub`, `exp`, and `jti`) likewise passes verification.
+
+In environments where a relying party caches ID tokens, or where a refresh token is obtained by a malicious actor, these tokens could be replayed at the UserInfo endpoint to extract the subject's claims without holding a valid access token.
+
+**Recommendation:**  
+Add a distinct `typ` claim to access tokens at issuance time and validate it at the UserInfo endpoint:
+
+```perl
+# In Controller::Root — when issuing access tokens:
+my %access_token_payload = (
+    sub => $user_claims->{sub},
+    aud => $client_id,
+    scp => $code_data->{scope},
+    typ => 'at+JWT',              # RFC 9068 access token type
+    exp => $now + 3600,
+);
+
+# In the userinfo action — after verify_token:
+unless ( ( $payload->{typ} // '' ) eq 'at+JWT' ) {
+    return $self->_json_error( $c, 'invalid_token',
+        'Presented token is not an access token' );
+}
+```
+
+---
+
+### NEW-MED-2 — Requested Scope Not Validated Against Registered Client Scopes
+
+**File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`  
+**Location:** `authorize` action  
+**Status:** **Open**
+
+**Description:**  
+The `scope` parameter is accepted and stored verbatim without being validated against the scopes registered for the requesting client in the application configuration. A client configured with `scope => 'openid profile email'` can successfully request `scope=openid admin` and will receive tokens bearing the wider scope string. Protected resources that rely on the `scp` claim in access tokens for authorization decisions may grant unwarranted privileges as a result.
+
+```perl
+# Current — any scope string is accepted without validation:
+$scope ||= $stored_auth_request->{scope} || 'openid';
+```
+
+**Recommendation:**  
+Intersect the requested scope with the client's registered scope list. Return an `invalid_scope` error if no overlap exists:
+
+```perl
+my @registered = split /\s+/, ( $client->{scope} // 'openid' );
+my @requested  = split /\s+/, ( $scope // 'openid' );
+my %allowed    = map { $_ => 1 } @registered;
+my @effective  = grep { $allowed{$_} } @requested;
+unless (@effective) {
+    return $self->_error_response( $c, $redirect_uri, 'invalid_scope',
+        'None of the requested scopes are registered for this client', $state );
+}
+$scope = join ' ', @effective;
+```
+
+---
+
 ## Low
 
 ### LOW-1 — Non-Cryptographic PRNG Used for User IDs in Example
@@ -364,6 +540,32 @@ The token endpoint does not implement any rate limiting or brute-force protectio
 
 **Recommendation:**  
 Apply rate limiting at the reverse proxy layer (e.g. Nginx `limit_req`) or use a Catalyst middleware (e.g. `Plack::Middleware::Throttle`) on the token endpoint. Consider locking out client IDs after a configurable number of consecutive authentication failures.
+
+---
+
+### NEW-LOW-1 — PKCE `code_challenge` Not Validated for Format at Authorization Endpoint
+
+**File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`  
+**Location:** `authorize` action  
+**Status:** **Open**
+
+**Description:**  
+When `code_challenge` is supplied, the `authorize` action validates that `code_challenge_method` is `S256` but does not validate the format of the `code_challenge` value itself. Per RFC 7636 §4.2, an S256 challenge must be `BASE64URL(SHA256(ASCII(code_verifier)))` — exactly 43 characters from the BASE64URL alphabet (`[A-Za-z0-9\-_]`, no padding). An over-long, under-long, or malformed value is stored verbatim in the backend.
+
+While `_verify_pkce` will reject any mismatch at the token endpoint (the computed challenge derived from the verifier will not match a malformed stored value), accepting an invalid challenge wastes store capacity and could produce unexpected behaviour in serialisation or logging pipelines.
+
+**Recommendation:**  
+Validate the `code_challenge` at the authorization endpoint before storing it:
+
+```perl
+if ( $code_challenge ) {
+    unless ( $code_challenge =~ /\A[A-Za-z0-9\-_]{43}\z/ ) {
+        return $self->_error_response( $c, $redirect_uri, 'invalid_request',
+            'code_challenge must be a 43-character BASE64URL string for S256',
+            $state );
+    }
+}
+```
 
 ---
 
@@ -420,14 +622,14 @@ my @allowed_uris = ref $uris eq 'ARRAY' ? @$uris : split /\s+/, ($uris // '');
 
 ## Appendix: Files Reviewed
 
-| File | Lines |
-|------|-------|
-| `lib/Catalyst/Plugin/OpenIDConnect.pm` | 290 |
-| `lib/Catalyst/Plugin/OpenIDConnect/Context.pm` | 220 |
-| `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm` | 770 |
-| `lib/Catalyst/Plugin/OpenIDConnect/Utils/JWT.pm` | 260 |
-| `lib/Catalyst/Plugin/OpenIDConnect/Utils/Store.pm` | 200 |
-| `lib/Catalyst/Plugin/OpenIDConnect/Utils/Store/Redis.pm` | 300 |
-| `lib/Catalyst/Plugin/OpenIDConnect/Role/Store.pm` | 70 |
-| `example/app.pl` | 200 |
+| File | Lines (re-audit) |
+|------|-----------------|
+| `lib/Catalyst/Plugin/OpenIDConnect.pm` | 322 |
+| `lib/Catalyst/Plugin/OpenIDConnect/Context.pm` | 216 |
+| `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm` | 897 |
+| `lib/Catalyst/Plugin/OpenIDConnect/Utils/JWT.pm` | 337 |
+| `lib/Catalyst/Plugin/OpenIDConnect/Utils/Store.pm` | 257 |
+| `lib/Catalyst/Plugin/OpenIDConnect/Utils/Store/Redis.pm` | 347 |
+| `lib/Catalyst/Plugin/OpenIDConnect/Role/Store.pm` | 113 |
+| `example/app.pl` | 252 |
 | `example/lib/OIDCExample/Controller/OpenIDConnect.pm` | 10 |
