@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11] - 2026-05-30 Fixed PREREQ_PM in Makefile.PL
+
 ## [0.10] - 2026-05-30 (Security Fixes: NEW-HIGH-1, NEW-HIGH-2, NEW-MED-1, NEW-MED-2, NEW-LOW-1)
 
 ### Security
