@@ -350,6 +350,13 @@ sub userinfo : Local {
         return $self->_json_error( $c, 'invalid_token', "Token verification failed: $_" );
     };
 
+    # Reject ID tokens and refresh tokens presented as access tokens (NEW-MED-1).
+    # Access tokens carry typ=at+JWT (RFC 9068); all other token types must be refused.
+    unless ( ( $payload->{typ} // '' ) eq 'at+JWT' ) {
+        $c->log->warn('Presented token is not an access token (typ=' . ($payload->{typ} // 'missing') . ')');
+        return $self->_json_error( $c, 'invalid_token', 'Presented token is not an access token' );
+    }
+
     # Get user and claims
     my $user_id = $payload->{sub};
     unless ($user_id) {
@@ -694,6 +701,7 @@ sub _handle_authorization_code_grant {
         sub => $user_claims->{sub},
         aud => $client_id,
         scp => $code_data->{scope},
+        typ => 'at+JWT',  # RFC 9068 — distinguishes access tokens from ID/refresh tokens (NEW-MED-1)
         exp => $now + 3600,
     );
 
@@ -787,6 +795,7 @@ sub _handle_refresh_token_grant {
     my %new_payload = (
         sub => $payload->{sub},
         aud => $client_id,
+        typ => 'at+JWT',  # RFC 9068 — distinguishes access tokens from ID/refresh tokens (NEW-MED-1)
         exp => $now + 3600,
     );
 

@@ -397,42 +397,13 @@ Add a `begin` action (or Catalyst middleware) that injects these headers on all 
 ### NEW-MED-1 — Token Type Confusion at UserInfo Endpoint
 
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`  
-**Location:** `userinfo` action; `lib/Catalyst/Plugin/OpenIDConnect/Utils/JWT.pm`  
-**Status:** **Open**
+**Location:** `userinfo` action; both access token issuance sites  
+**Status:** **Fixed (2026-05-30)**
 
-**Description:**  
-`create_id_token`, `create_access_token`, and `create_refresh_token` all call the same `sign_token` function and produce structurally identical JWTs. No `typ` claim distinguishes token types (RFC 9068 reserves `at+JWT` for access tokens). At the UserInfo endpoint the bearer token is verified with:
+**Fix applied:**
 
-```perl
-$payload = $c->openidconnect->jwt->verify_token($token);
-```
-
-No `expected_audience` is supplied and no `typ` check is performed. As a result:
-
-- An **ID token** (valid `iss`, `sub`, `exp`, `aud`) passes `verify_token` and satisfies the UserInfo handler even though it is intended for consumption by a relying party, not for authorizing API requests.
-- A **refresh token** (also a signed JWT with `iss`, `sub`, `exp`, and `jti`) likewise passes verification.
-
-In environments where a relying party caches ID tokens, or where a refresh token is obtained by a malicious actor, these tokens could be replayed at the UserInfo endpoint to extract the subject's claims without holding a valid access token.
-
-**Recommendation:**  
-Add a distinct `typ` claim to access tokens at issuance time and validate it at the UserInfo endpoint:
-
-```perl
-# In Controller::Root — when issuing access tokens:
-my %access_token_payload = (
-    sub => $user_claims->{sub},
-    aud => $client_id,
-    scp => $code_data->{scope},
-    typ => 'at+JWT',              # RFC 9068 access token type
-    exp => $now + 3600,
-);
-
-# In the userinfo action — after verify_token:
-unless ( ( $payload->{typ} // '' ) eq 'at+JWT' ) {
-    return $self->_json_error( $c, 'invalid_token',
-        'Presented token is not an access token' );
-}
-```
+1. `typ => 'at+JWT'` (RFC 9068) added to the access token payload at both issuance points: the authorization code grant (`_handle_authorization_code_grant`) and the refresh token grant (`_handle_refresh_token_grant`). ID tokens and refresh tokens do not receive this claim, so the three token types are now structurally distinct.
+2. The `userinfo` action rejects any bearer token whose `typ` claim is absent or not `at+JWT`, returning `invalid_token` before any claims are read.
 
 ---
 
