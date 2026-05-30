@@ -139,48 +139,45 @@ sub authorize : Local {
     $code_challenge        //= $stored_auth_request->{code_challenge};
     $code_challenge_method //= $stored_auth_request->{code_challenge_method};
 
-    # Validate request parameters
+    # --- Phase 1: validate client_id and redirect_uri BEFORE using either in a
+    # redirect-based error response (NEW-HIGH-1 / RFC 6749 §4.1.2.1).
+    # Any error raised here returns a direct HTTP 400; we must never redirect
+    # to a URI that has not yet been confirmed as registered for the client.
+
+    unless ($client_id) {
+        $c->log->warn('Missing client_id parameter');
+        return $self->_json_error( $c, 'invalid_request', 'client_id is required' );
+    }
+
+    unless ($redirect_uri) {
+        $c->log->warn('Missing redirect_uri parameter');
+        return $self->_json_error( $c, 'invalid_request', 'redirect_uri is required' );
+    }
+
+    # Resolve client — must succeed before redirect_uri can be validated.
+    my $client = $c->openidconnect->get_client($client_id);
+    unless ($client) {
+        $c->log->error("Unknown client: $client_id");
+        return $self->_json_error( $c, 'invalid_client', 'Unknown client' );
+    }
+
+    # Validate redirect_uri against the registered list.
+    # Only after this check is it safe to use $redirect_uri in _error_response.
+    my @allowed_uris = _normalize_uri_list( $client->{redirect_uris} );
+    unless ( grep { $_ eq $redirect_uri } @allowed_uris ) {
+        $c->log->error("Redirect URI mismatch for client $client_id: $redirect_uri");
+        return $self->_json_error( $c, 'invalid_request',
+            'Redirect URI not registered' );
+    }
+
+    # --- Phase 2: remaining parameter validation — redirect_uri is now
+    # confirmed registered so _error_response redirects are safe from here on.
+
     unless ( $response_type && $response_type eq 'code' ) {
         $c->log->warn("Invalid response_type: $response_type");
         return $self->_error_response(
             $c, $redirect_uri, 'invalid_request',
             'response_type must be "code"', $state
-        );
-    }
-
-    unless ($client_id) {
-        $c->log->warn('Missing client_id parameter');
-        return $self->_error_response(
-            $c, undef, 'invalid_request',
-            'client_id is required'
-        );
-    }
-
-    unless ($redirect_uri) {
-        $c->log->warn('Missing redirect_uri parameter');
-        return $self->_error_response(
-            $c, undef, 'invalid_request',
-            'redirect_uri is required'
-        );
-    }
-
-    # Get client config
-    my $client = $c->openidconnect->get_client($client_id);
-    unless ($client) {
-        $c->log->error("Unknown client: $client_id");
-        return $self->_error_response(
-            $c, $redirect_uri, 'invalid_client',
-            'Unknown client', $state
-        );
-    }
-
-    # Validate redirect URI
-    my @allowed_uris = _normalize_uri_list( $client->{redirect_uris} );
-    unless ( grep { $_ eq $redirect_uri } @allowed_uris ) {
-        $c->log->error("Redirect URI mismatch for client $client_id: $redirect_uri");
-        return $self->_error_response(
-            $c, undef, 'invalid_request',
-            'Redirect URI not registered'
         );
     }
 

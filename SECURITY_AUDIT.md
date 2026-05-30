@@ -194,7 +194,10 @@ Add `code_challenge` and `code_challenge_method` handling to the authorize endpo
 
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`  
 **Location:** `authorize` action  
-**Status:** **Open**
+**Status:** **Fixed (2026-05-30)**
+
+**Fix applied:**  
+The `authorize` action was split into two explicit phases. Phase 1 validates `client_id`, `redirect_uri`, and the registered redirect URI list using direct HTTP 400 responses (`_json_error`) — no redirect is issued. Only once `redirect_uri` has been confirmed as registered does the action proceed to Phase 2, where `_error_response` (which may redirect) is used for remaining parameter validation such as `response_type`. The previous validation order — which called `_error_response` with the unvalidated `redirect_uri` before the client was even looked up — has been removed.
 
 **Description:**  
 RFC 6749 §4.1.2.1 states that the authorization server MUST NOT automatically redirect the user-agent to an unregistered or invalid redirect URI. Two error paths in the `authorize` action violate this requirement:
@@ -212,26 +215,7 @@ An attacker can exploit either path by crafting an authorization URL such as:
 
 A victim who follows this link — which carries the trusted identity-provider domain — is silently redirected to the attacker-controlled site carrying an OAuth error payload, enabling phishing and credential harvesting.
 
-**Recommendation:**  
-Validate `client_id` and `redirect_uri` against the registered list **before** using either in any redirect. Return a direct HTTP 400 response (no redirect) when validation cannot be completed:
-
-```perl
-# 1. Validate client_id first — return direct error if unknown
-my $client = $c->openidconnect->get_client($client_id)
-    or return $self->_json_error($c, 'invalid_client', 'Unknown client');
-
-# 2. Validate redirect_uri against registered list — return direct error if invalid
-my @allowed_uris = _normalize_uri_list($client->{redirect_uris});
-grep { $_ eq $redirect_uri } @allowed_uris
-    or return $self->_json_error($c, 'invalid_request',
-        'Redirect URI not registered');
-
-# 3. Only now is it safe to use $redirect_uri in _error_response
-unless ($response_type && $response_type eq 'code') {
-    return $self->_error_response($c, $redirect_uri, 'invalid_request',
-        'response_type must be "code"', $state);
-}
-```
+The fix applied reorders validation as described above. The old pre-validation order is replaced; refer to the source diff for full details.
 
 ---
 
