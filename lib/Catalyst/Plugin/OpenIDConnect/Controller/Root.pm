@@ -624,6 +624,19 @@ sub _handle_authorization_code_grant {
     # Use client_id from authorization code if not provided in request (public client flow)
     $client_id ||= $code_data->{client_id};
 
+    # Enforce that the client presenting the token request is the same client
+    # the authorization code was issued to (RFC 6749 §4.1.3, NEW-HIGH-2).
+    # Without this check a confidential client that obtains another client's
+    # code could redeem it by authenticating with its own valid secret.
+    if ( $client_id ne $code_data->{client_id} ) {
+        $c->log->warn(
+            "client_id mismatch at token endpoint: "
+            . "request=$client_id stored=$code_data->{client_id}"
+        );
+        return $self->_json_error( $c, 'invalid_grant',
+            'client_id does not match the authorization code' );
+    }
+
     # Verify redirect URI matches
     unless ( $code_data->{redirect_uri} eq $redirect_uri ) {
         $c->log->error("Redirect URI mismatch for code: $code (expected: " . $code_data->{redirect_uri} . ", got: $redirect_uri)");

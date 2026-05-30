@@ -223,7 +223,10 @@ The fix applied reorders validation as described above. The old pre-validation o
 
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`  
 **Location:** `_handle_authorization_code_grant`  
-**Status:** **Open**
+**Status:** **Fixed (2026-05-30)**
+
+**Fix applied:**  
+After resolving `client_id` (using the stored value as a fallback for public clients), the handler now immediately asserts that the resolved `client_id` equals `$code_data->{client_id}`. A mismatch returns `invalid_grant` and no tokens are issued. The check fires before the redirect URI comparison and before client authentication, so a cross-client redemption attempt is rejected regardless of whether the attacker also supplies a valid client secret.
 
 **Description:**  
 The token endpoint does not verify that the `client_id` in the token request matches the `client_id` stored with the authorization code. The relevant assignment is:
@@ -245,20 +248,7 @@ The stored `client_id` is used only as a fallback when the request omits the fie
 
 PKCE mitigates this for public clients (the attacker cannot produce a valid `code_verifier` for the victim's `code_challenge`), but confidential clients — for which PKCE is optional — remain vulnerable.
 
-**Recommendation:**  
-After resolving `client_id`, assert that it matches the value stored with the authorization code:
-
-```perl
-$client_id //= $code_data->{client_id};
-if ( $client_id ne $code_data->{client_id} ) {
-    $c->log->warn(
-        "client_id mismatch at token endpoint: "
-        . "request=$client_id stored=$code_data->{client_id}"
-    );
-    return $self->_json_error( $c, 'invalid_grant',
-        'client_id does not match the authorization code' );
-}
-```
+The fix applied adds the client_id binding check as described above.
 
 ---
 
