@@ -472,25 +472,10 @@ Apply rate limiting at the reverse proxy layer (e.g. Nginx `limit_req`) or use a
 
 **File:** `lib/Catalyst/Plugin/OpenIDConnect/Controller/Root.pm`  
 **Location:** `authorize` action  
-**Status:** **Open**
+**Status:** **Fixed (2026-05-30)**
 
-**Description:**  
-When `code_challenge` is supplied, the `authorize` action validates that `code_challenge_method` is `S256` but does not validate the format of the `code_challenge` value itself. Per RFC 7636 §4.2, an S256 challenge must be `BASE64URL(SHA256(ASCII(code_verifier)))` — exactly 43 characters from the BASE64URL alphabet (`[A-Za-z0-9\-_]`, no padding). An over-long, under-long, or malformed value is stored verbatim in the backend.
-
-While `_verify_pkce` will reject any mismatch at the token endpoint (the computed challenge derived from the verifier will not match a malformed stored value), accepting an invalid challenge wastes store capacity and could produce unexpected behaviour in serialisation or logging pipelines.
-
-**Recommendation:**  
-Validate the `code_challenge` at the authorization endpoint before storing it:
-
-```perl
-if ( $code_challenge ) {
-    unless ( $code_challenge =~ /\A[A-Za-z0-9\-_]{43}\z/ ) {
-        return $self->_error_response( $c, $redirect_uri, 'invalid_request',
-            'code_challenge must be a 43-character BASE64URL string for S256',
-            $state );
-    }
-}
-```
+**Fix applied:**  
+Inside the existing `if ( $code_challenge )` block, after the `S256` method check, a regex validates that the value matches `\A[A-Za-z0-9\-_]{43}\z` — exactly 43 characters from the BASE64URL alphabet with no padding, as required by RFC 7636 §4.2. A malformed challenge returns `invalid_request` and no code is issued.
 
 ---
 

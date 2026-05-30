@@ -253,6 +253,18 @@ sub authorize : Local {
                 'code_challenge_method must be S256', $state
             );
         }
+        # Validate the challenge value format (NEW-LOW-1 / RFC 7636 §4.2).
+        # An S256 challenge is BASE64URL(SHA256(verifier)) — exactly 43 chars
+        # from the BASE64URL alphabet with no padding.  Reject malformed values
+        # before they reach the store or any downstream comparison.
+        unless ( $code_challenge =~ /\A[A-Za-z0-9\-_]{43}\z/ ) {
+            $c->log->warn("Malformed code_challenge for client $client_id");
+            return $self->_error_response(
+                $c, $redirect_uri, 'invalid_request',
+                'code_challenge must be a 43-character BASE64URL-encoded string',
+                $state
+            );
+        }
     }
 
     # Extract user claims now, while the live user object is available.
