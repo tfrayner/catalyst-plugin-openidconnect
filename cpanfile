@@ -1,5 +1,6 @@
 requires 'perl', '5.020';
-requires 'ExtUtils::MakeMaker' => '6.52';
+configure_requires 'ExtUtils::MakeMaker', '6.52';
+configure_requires 'Module::CPANfile', '1.1';
 
 requires 'Catalyst';
 requires 'Catalyst::Runtime', '>= 5.90100';
@@ -33,5 +34,5 @@ on 'test' => sub {
     requires 'Test::Exception';
     requires 'Test::MockObject';
     requires 'Test::Deep';
-    requires 'Test::Pod::Coverage', '>= 1.04';
+    recommends 'Test::Pod::Coverage', '>= 1.04';
 };
