@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.15] - Unreleased Extension points implementation
+## [0.15] - 2026-06-21 Extension points implementation
 
 - Added support for registering additional functions that can be used to 
   extend beyond the standard OIDC specification where needed (see [README.md](README.md#advanced-topics)):
