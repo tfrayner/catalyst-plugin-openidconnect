@@ -437,7 +437,8 @@ sub userinfo : Local {
     $c->log->debug("UserInfo requested for user: $user_id") if $config->{debug};
 
     # Build claims from token using standard list. String context
-    # is required for correct JSON encoding of these attributes.
+    # is required for correct JSON encoding of these attributes. Other
+    # registered claims which must be strings are: iss, aud, jti (RFC7519 §4.1).
     my %claims = map { $_ => "$payload->{$_}" } qw(sub);
 
     # Include remaining claims which are not as tightly specified.

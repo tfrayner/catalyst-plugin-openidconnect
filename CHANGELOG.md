@@ -4,8 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-- Fixed the UserInfo endpoint to serialize a numeric `sub` claim as a JSON
-  string, as required by RFC 7519.
+- Ensured numeric `sub` claims are serialized as JSON strings in issued JWTs
+  and UserInfo responses, as required by RFC 7519.
 
 ## [0.15] - 2026-06-21 Extension points implementation
 
