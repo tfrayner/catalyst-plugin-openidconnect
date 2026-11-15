@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## [0.16] - 2026-11-15 Ensure JWT and user claim values are appropriately stringified
 
 - Ensured numeric `sub` claims are serialized as JSON strings in issued JWTs
   and UserInfo responses, as required by RFC 7519.
